@@ -1,0 +1,22 @@
+{
+  "frames": 156,
+  "size": [
+    320,
+    240
+  ],
+  "samples": {
+    "0": {
+      "distinct_rgb": 1202,
+      "sha256": "4f79b168c659b0eff54e07e48a42023a6165adcf2f1b3bae6a590cdb24d38503"
+    },
+    "20": {
+      "distinct_rgb": 152,
+      "sha256": "da1b775e827ef56edd7096c1dbdcdf16641d0e089c01105da49f5bfede03cc2a"
+    }
+  },
+  "clean_exit": true,
+  "changed_block_bytes": 1,
+  "save_files": [
+    "level.dat"
+  ]
+}

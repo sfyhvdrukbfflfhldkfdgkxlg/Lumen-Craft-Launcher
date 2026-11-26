@@ -1,0 +1,29 @@
+LumenCraft-Alpha1.0.0.apk
+Verified using v1 scheme (JAR signing): true
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): false
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Signer #1 certificate SHA-256 digest: 517e9aaddda76fe7abfc9dd9b64b619de8cbbf5f37235f2036d0210fd56cb0a8
+package: name='dev.lumencraft.android' versionCode='2' versionName='Alpha1.0.0' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'
+sdkVersion:'23'
+targetSdkVersion:'35'
+launchable-activity: name='dev.lumencraft.MainActivity'  label='' icon=''
+native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'
+        A: android:screenOrientation(0x0101001e)=(type 0x10)0x6
+        A: android:screenOrientation(0x0101001e)=(type 0x10)0x6
+        A: android:screenOrientation(0x0101001e)=(type 0x10)0x6
+        A: android:screenOrientation(0x0101001e)=(type 0x10)0x6
+LumenCraft-Rooms-Alpha1.0.0.apk
+Verified using v1 scheme (JAR signing): true
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): false
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Signer #1 certificate SHA-256 digest: 517e9aaddda76fe7abfc9dd9b64b619de8cbbf5f37235f2036d0210fd56cb0a8
+package: name='dev.lumencraft.rooms' versionCode='2' versionName='Alpha1.0.0' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'
+sdkVersion:'23'
+targetSdkVersion:'35'
+launchable-activity: name='dev.lumencraft.rooms.TerracottaActivity'  label='' icon=''
+native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'
+        A: android:screenOrientation(0x0101001e)=(type 0x10)0x6

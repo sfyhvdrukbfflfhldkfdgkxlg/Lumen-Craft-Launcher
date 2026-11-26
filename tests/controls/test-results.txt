@@ -1,0 +1,15 @@
+PASS RubyDung controls and stick
+PASS round trip default v21
+PASS direction codes
+PASS FCL proportional size
+PASS extended arrow evdev to LWJGL2
+PASS physical Android A
+PASS GLFW translation keys
+PASS options.txt recognized only bound inputs
+PASS add chosen mod binding
+PASS generated IDs prevent duplicate buttons
+PASS user layout preserved
+PASS official controllerVersion 21 parse
+PASS official file round-trip preserves unknown fields
+Official default recognized 12 active controls, skipped 1 non-key controls.
+Passed 13 control profile checks

@@ -1,0 +1,19 @@
+{
+  "testedAt": "2026-11-26",
+  "device": "Android Emulator (QEMU aarch64 TCG, 1 emulated core)",
+  "fingerprint": "Android/sdk_phone_arm64/generic_arm64:7.0/NYC/8695085:userdebug/test-keys",
+  "sdk": 24,
+  "abi": "arm64-v8a",
+  "guestUnameMachine": "aarch64",
+  "javaVersion": "1.8.0_482",
+  "jvmProbe": "OpenJDK specification 1.8 (requested 8)",
+  "jvmProbeExit": 0,
+  "googleImageUrl": "https://dl.google.com/android/repository/sys-img/android/arm64-v8a-24_r09.zip",
+  "googleImageSha1": "e88ebdf4533efa0370603ee4ab0e7834e0cc364f",
+  "jreArchiveSha256": "9a59124d9791957d55c68be664ab76831f336cf2e1e1cd4414220c6fdbf0e06d",
+  "gameVersion": "rd-132211",
+  "gameSha1": "393e8d4b4d708587e2accd7c5221db65365e1075",
+  "jvmHostSha256": "0fb0daee3977d577139470e576fe874635cf825a39a2cdbc4e4cb23e279c4bcd",
+  "rendererSha256": "dd32f0bf8997242dc15f7967c03e895847b742257cbfc0a9ab4f4ecd40ee5cd8",
+  "bridgeSha256": "65af950f2df1a2819c9e3117e4a1ec72923a0a8bc65ef1a61c3588232094b017"
+}

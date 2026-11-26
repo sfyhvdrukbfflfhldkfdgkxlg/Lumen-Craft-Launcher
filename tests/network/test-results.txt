@@ -1,0 +1,106 @@
+PASS bracketed IPv6
+PASS bare domain requests SRV
+PASS explicit port bypasses SRV
+PASS reject URL
+PASS reject invalid port
+PASS reject invalid ipv6
+PASS SRV compressed owner, target and port
+PASS SRV priority route order
+PASS DNS response bound to question
+PASS DNS truncated answer
+PASS TCP handshake, status, ping/pong
+PASS formatted nested MOTD
+PASS Forge status hint
+PASS exact official id match
+PASS no version guessed
+PASS transitive and pinned client dependencies
+PASS verified repeat install reuses files
+PASS declared project incompatibility
+PASS exclude server-only dependency
+PASS reject incompatible game
+PASS SHA-512 integrity failure
+PASS failed graph published no files
+PASS preserve user file on filename conflict
+PASS user file retained
+PASS live Modrinth search
+PASS live Sodium client download + SHA-512
+Live artifact sodium-fabric-0.8.13+mc1.21.1.jar 1574609 bytes
+Passed 26 checks
+PASS publish isolated pack instance
+PASS exact game and Fabric loader pins
+PASS mirror fallback and dual digest
+PASS skip optional and dedicated files
+PASS client overrides take precedence
+PASS no dedicated overrides
+PASS record pack source digest
+PASS existing instance protected
+PASS unsupported loader rejected
+PASS ZIP traversal rejected
+PASS protect launcher metadata
+PASS absolute manifest path rejected
+PASS valid SHA1 cannot mask bad SHA512
+PASS failed imports leave only complete instance
+PASS live Fabulously Optimized mrpack and index
+Live pack Fabulously Optimized 14.1.2 / 173368 bytes / 51 files
+Passed 15 pack checks
+
+Release audit 2026-11-26 / Windows JVM / deterministic regression (no live network)
+ע: D:\LumenCraftAndroid\core\src\main\java\dev\lumencraft\core\Modrinth.javaʹ����δ�����򲻰�ȫ�Ĳ�����
+ע: �й���ϸ��Ϣ, ��ʹ�� -Xlint:unchecked ���±��롣
+PASS bracketed IPv6
+PASS bare domain requests SRV
+PASS explicit port bypasses SRV
+PASS reject URL
+PASS reject invalid port
+PASS reject invalid ipv6
+PASS SRV compressed owner, target and port
+PASS SRV priority route order
+PASS DNS response bound to question
+PASS DNS truncated answer
+PASS TCP handshake, status, ping/pong
+PASS formatted nested MOTD
+PASS Forge status hint
+PASS exact official id match
+PASS no version guessed
+PASS transitive and pinned client dependencies
+PASS verified repeat install reuses files
+PASS declared project incompatibility
+PASS exclude server-only dependency
+PASS reject incompatible game
+PASS SHA-512 integrity failure
+PASS failed graph published no files
+PASS preserve user file on filename conflict
+PASS user file retained
+Passed 24 checks
+PASS publish isolated pack instance
+PASS exact game and Fabric loader pins
+PASS mirror fallback and dual digest
+PASS skip optional and dedicated files
+PASS client overrides take precedence
+PASS no dedicated overrides
+PASS record pack source digest
+PASS existing instance protected
+PASS unsupported loader rejected
+PASS ZIP traversal rejected
+PASS protect launcher metadata
+PASS absolute manifest path rejected
+PASS valid SHA1 cannot mask bad SHA512
+PASS failed imports leave only complete instance
+PASS explicit known manifest resolves ambiguous status
+PASS reject exact status conflict
+PASS reject wrong game port
+PASS reject fractional schema
+PASS reject unknown manifest game
+PASS require HTTPS pack URL
+PASS pin archive digest at handoff
+PASS pin inner Minecraft version before installing
+PASS rejected manifests downloaded no components
+PASS pin loader and store address
+PASS repeat exact server install reuses committed instance
+PASS failed update is never published
+PASS failed server update retains old world and removes staging
+PASS changed pack creates isolated revision
+PASS do not reuse wrong loader version
+PASS do not reuse wrong server address
+PASS parallel callers commit one copy
+Passed 31 pack checks

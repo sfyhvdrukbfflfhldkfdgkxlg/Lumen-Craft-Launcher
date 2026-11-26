@@ -1,0 +1,10 @@
+PASS save backup
+PASS restore without overwrite
+PASS clone preserves world bytes
+PASS archive
+PASS restore archived instance
+PASS unsafe backup rejected
+PASS plain zip rejected as mod
+PASS same mod imported idempotently
+PASS identical RubyDung world rotates once
+PASS invalid world cannot replace live save

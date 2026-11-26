@@ -1,0 +1,17 @@
+java.io.FileNotFoundException: level.dat (系统找不到指定的文件。)
+	at java.base/java.io.FileInputStream.open0(Native Method)
+	at java.base/java.io.FileInputStream.open(FileInputStream.java:216)
+	at java.base/java.io.FileInputStream.<init>(FileInputStream.java:157)
+	at com.mojang.rubydung.level.Level.load(Level.java:79)
+	at com.mojang.rubydung.level.Level.<init>(Level.java:29)
+	at com.mojang.rubydung.RubyDung.init(RubyDung.java:98)
+	at com.mojang.rubydung.RubyDung.run(RubyDung.java:126)
+	at java.base/java.lang.Thread.run(Thread.java:840)
+/terrain.png -> 1
+19 fps, 304
+22 fps, 352
+23 fps, 368
+23 fps, 368
+21 fps, 336
+22 fps, 320
+22 fps, 2
