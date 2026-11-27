@@ -24,17 +24,28 @@ final class AccountVault {
     AccountVault(Context c) { prefs=c.getSharedPreferences("accounts",Context.MODE_PRIVATE); }
 
     static final class Profile {
-        final String key,name,id;
-        final boolean online,selected;
+        final String key,name,id,type,apiUrl,skinUrl,capeUrl;
+        final boolean online,yggdrasil,selected;
         Profile(String key,JSONObject p,String current) throws JSONException {
             this.key=key; name=p.getString("name"); id=p.getString("id");
-            online="microsoft".equals(p.getString("type"));
+            type=p.getString("type");
+            online="microsoft".equals(type);
+            yggdrasil="yggdrasil".equals(type);
+            apiUrl=p.optString("apiUrl","");
+            skinUrl=p.optString("skinUrl","");
+            capeUrl=p.optString("capeUrl","");
             selected=key.equals(current);
         }
     }
     static final class Credential {
-        final String client,refresh;
-        Credential(JSONObject p) throws JSONException { client=p.getString("client");refresh=p.getString("refresh"); }
+        final String client,refresh,apiUrl,accessToken,clientToken;
+        Credential(JSONObject p) throws JSONException {
+            client=p.optString("client","");
+            refresh=p.optString("refresh","");
+            apiUrl=p.optString("apiUrl","");
+            accessToken=p.optString("accessToken","");
+            clientToken=p.optString("clientToken","");
+        }
     }
     private static SecretKey key(boolean create) throws Exception {
         KeyStore keys=KeyStore.getInstance("AndroidKeyStore"); keys.load(null);
@@ -123,6 +134,25 @@ final class AccountVault {
             if (p==null || !oauth.refresh.equals(p.optString("refresh")) || !game.id.equals(p.getString("id")))
                 throw new AccountProblem("刷新后的账户身份不一致");
             p.put("name",game.name);
+            write(state);
+        }
+    }
+    void storeYggdrasil(YggdrasilLogin.AuthResult auth) throws Exception {
+        synchronized (LOCK) {
+            JSONObject state=read();
+            String key="ygg-"+auth.profileId;
+            state.getJSONObject("profiles").put(key,new JSONObject()
+                    .put("type","yggdrasil").put("name",auth.profileName).put("id",auth.profileId)
+                    .put("apiUrl",auth.apiUrl).put("accessToken",auth.accessToken).put("clientToken",auth.clientToken)
+                    .put("skinUrl",auth.skinUrl).put("capeUrl",auth.capeUrl));
+            write(state.put("current",key));
+        }
+    }
+    void setCustomSkin(String key,String skinPath) throws Exception {
+        synchronized (LOCK) {
+            JSONObject state=read(), p=state.getJSONObject("profiles").optJSONObject(key);
+            if (p==null) throw new AccountProblem("账户不存在");
+            p.put("skinUrl",skinPath==null?"":skinPath);
             write(state);
         }
     }
