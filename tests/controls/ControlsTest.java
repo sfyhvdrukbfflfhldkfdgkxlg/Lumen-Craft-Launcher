@@ -25,7 +25,8 @@ public final class ControlsTest {
             check("options.txt recognized only bound inputs",bindings.size()==4&&bindings.get("mod.arrow")==103&&bindings.get("mod.use")==1002);
         }finally{Files.delete(options);}
         JSONObject initial=new JSONObject(defaults.buttons.get(0).original.toString());
-        check("add chosen mod binding",defaults.addBinding("mod.feature",67,300,350));
+        check("add chosen mod binding",defaults.addBinding("mod.feature","飞行开关",67,300,350));
+        check("localized label preserved","飞行开关".equals(defaults.buttons.get(defaults.buttons.size()-1).text));
         check("generated IDs prevent duplicate buttons",!defaults.addBinding("mod.feature",67,600,650));
         check("user layout preserved",defaults.buttons.get(0).original.toString().equals(initial.toString()));
         if(args.length==1){

@@ -127,7 +127,8 @@ public final class InstallerTest {
         fails(() -> installer.install("missing",false,null), "unknown version accepted");
         fails(() -> installer.install("1.2.3","../evil",false,null), "instance traversal");
         loaderTests(f, d, temp, client);
-        System.out.println("PASS verified range resume, SHA-1/256, cache repair, HTTPS, cancellation, safe paths, Linux rules, isolated installs, legacy assets, server files, unknown versions, Fabric and Quilt exact/automatic loader selection and checksum-backed install.");
+        extendedLoaderAndPlanTests(f, d, temp, client);
+        System.out.println("PASS verified range resume, SHA-1/256, cache repair, HTTPS, cancellation, safe paths, Linux rules, isolated installs, legacy assets, server files, unknown versions, Fabric/Quilt/NeoForge/Forge/LiteLoader/OptiFine, MirrorBench and LaunchPlan.");
         if (args.length != 0) {
             VanillaInstaller live = new VanillaInstaller(new File(args[0]));
             System.out.println("Live catalog entries = " + live.versions().size());
@@ -205,5 +206,45 @@ public final class InstallerTest {
             check(result.equals("0.10.1") && lock.getString("loader").equals(family) &&
                     new File(root, lock.getJSONArray("classpath").getString(0)).isFile(), "library commit");
         }
+    }
+    private static void extendedLoaderAndPlanTests(Fixture f, VerifiedDownloads d, File root, File instance) throws Exception {
+        // MirrorBench URL rewriting and custom HTTPS validation
+        MirrorBench.configure(MirrorBench.SourceId.BMCLAPI, "");
+        check(MirrorBench.rewrite("https://libraries.minecraft.net/a/b.jar").equals("https://bmclapi2.bangbang93.com/maven/a/b.jar"), "BMCLAPI maven rewrite");
+        check(MirrorBench.rewrite("https://resources.download.minecraft.net/ab/abcdef").equals("https://bmclapi2.bangbang93.com/assets/ab/abcdef"), "BMCLAPI assets rewrite");
+        fails(() -> MirrorBench.configure(MirrorBench.SourceId.CUSTOM, "http://insecure.example"), "reject HTTP custom mirror");
+        MirrorBench.configure(MirrorBench.SourceId.OFFICIAL, "");
+
+        // NeoForge + Forge version selection
+        String neoXml = "<metadata><versioning><versions><version>21.1.72</version><version>21.1.90-beta</version><version>21.1.85</version><version>20.4.200</version></versions></versioning></metadata>";
+        check("21.1.85".equals(ModLoaderInstaller.chooseNeoForgeVersion(neoXml, "1.21.1", null)), "NeoForge stable preference");
+        check("21.1.90-beta".equals(ModLoaderInstaller.chooseNeoForgeVersion(neoXml, "1.21.1", "21.1.90-beta")), "NeoForge exact pin");
+        JSONObject promos = new JSONObject("{\"promos\":{\"1.20.1-recommended\":\"47.3.0\",\"1.20.1-latest\":\"47.3.12\"}}");
+        check("47.3.0".equals(ModLoaderInstaller.chooseForgeVersion(promos, "1.20.1", null)), "Forge recommended selection");
+
+        // OptiFine local JAR import (valid & invalid)
+        java.io.ByteArrayOutputStream validOf = new java.io.ByteArrayOutputStream();
+        byte[] pseudoClass = new byte[2048];
+        for (int i = 0; i < pseudoClass.length; i++) pseudoClass[i] = (byte) ((i * 73 + (i >> 3) * 19) & 0xff);
+        try (java.util.zip.ZipOutputStream z = new java.util.zip.ZipOutputStream(validOf)) {
+            z.setLevel(java.util.zip.Deflater.NO_COMPRESSION);
+            z.putNextEntry(new java.util.zip.ZipEntry("optifine/OptiFineTweaker.class"));
+            z.write(pseudoClass);
+            z.closeEntry();
+            z.putNextEntry(new java.util.zip.ZipEntry("changelog.txt"));
+            z.write("OptiFine 1.2.3 HD U I6\n".getBytes(StandardCharsets.UTF_8));
+            z.closeEntry();
+        }
+        File ofInstance = new File(root, "instances/world-2");
+        String ofVer = ModLoaderInstaller.installLocalOptiFine(root, ofInstance, new ByteArrayInputStream(validOf.toByteArray()), null);
+        check(ofVer.contains("OptiFine 1.2.3") && "optifine".equals(VanillaInstaller.readJson(new File(ofInstance, "loader.json")).getString("loader")), "local OptiFine import");
+        fails(() -> ModLoaderInstaller.installLocalOptiFine(root, ofInstance, new ByteArrayInputStream(new byte[100]), null), "reject invalid OptiFine jar");
+
+        // LaunchPlan assembly
+        LaunchPlan plan = LaunchPlan.build(root, ofInstance, new LaunchPlan.AccountSpec("Alex", "11112222333344445555666677778888", "tok", "msa", null), 1024, 1280, 720);
+        check(plan.javaMajor == 8 && "net.minecraft.launchwrapper.Launch".equals(plan.mainClass)
+                && plan.gameArgs.contains("optifine.OptiFineTweaker") && plan.classpath.size() >= 3, "LaunchPlan classpath and tweakClass");
+        File argsFile = plan.writeJvmArgsFile(new File(root, "test-jvm.args"));
+        check(new String(Files.readAllBytes(argsFile.toPath()), StandardCharsets.UTF_8).contains("-Dminecraft.launcher.brand=LumenCraft"), "write JVM args file");
     }
 }

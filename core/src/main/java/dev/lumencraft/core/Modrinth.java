@@ -112,7 +112,7 @@ public final class Modrinth {
                     (url.getPort() != -1 && url.getPort() != 443)) throw new IOException("下载地址不在整合包支持的 HTTPS 来源内");
                 final HttpURLConnection http = (HttpURLConnection)url.openConnection();
                 http.setInstanceFollowRedirects(false); http.setConnectTimeout(10000); http.setReadTimeout(25000);
-                http.setRequestProperty("User-Agent", "LumenCraftAndroid/Alpha1.0.0 (Android Minecraft launcher)");
+                http.setRequestProperty("User-Agent", "LumenCraftAndroid/Alpha1.2.0 (Android Minecraft launcher)");
                 try {
                     int status = http.getResponseCode();
                     if (status >= 300 && status < 400) {

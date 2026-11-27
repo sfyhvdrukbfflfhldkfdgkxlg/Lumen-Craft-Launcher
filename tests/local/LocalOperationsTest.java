@@ -38,6 +38,37 @@ public final class LocalOperationsTest {
             byte[] before=Files.readAllBytes(new File(data,"level.dat").toPath());
             try {ClassicSaves.restore(data,new ByteArrayInputStream(new byte[]{0}));throw new AssertionError("accepted invalid world");}catch(IOException expected){}
             check(Arrays.equals(before,Files.readAllBytes(new File(data,"level.dat").toPath())),"invalid world cannot replace live save");
+
+            // CrashNotes structured diagnosis
+            CrashNotes.Diagnosis oom=CrashNotes.diagnose("java.lang.OutOfMemoryError: Java heap space");
+            check("OOM".equals(oom.category) && oom.action==CrashNotes.RepairAction.LOWER_HEAP,"diagnose OOM");
+            CrashNotes.Diagnosis missing=CrashNotes.diagnose("java.lang.NoClassDefFoundError: com/example/MissingClass");
+            check("MISSING_CLASS".equals(missing.category) && missing.culprit.contains("MissingClass"),"diagnose missing class");
+            CrashNotes.Diagnosis gl=CrashNotes.diagnose("GLFW error 65542: WGL/EGL failed");
+            check("GRAPHICS".equals(gl.category) && gl.action==CrashNotes.RepairAction.FALLBACK_RENDERER,"diagnose graphics fallback");
+
+            // DeviceProfile recommendations + snapshot rollback
+            DeviceProfile.Recommendation rec=DeviceProfile.recommend(8L<<30,4L<<30,false,false,
+                    "GL: OpenGL ES 3.2\n1px render/readback: PASS\nVulkan: 1.3.250 · Adreno (integrated)",true);
+            check(rec.heapMiB>=512 && rec.rendererBackend.contains("GLES 3.0") && rec.rendererBackend.contains("Vulkan"),"device profile GLES3+Vulkan");
+            DeviceProfile.Recommendation low=DeviceProfile.recommend(2L<<30,512L<<20,true,true,"EGL failed",true);
+            check(low.maxFps==15 && low.rendererBackend.contains("软件"),"device profile low-ram fallback");
+            File snap=root.resolve("config-snap.json").toFile();
+            DeviceProfile.saveSnapshot(snap,new org.json.JSONObject().put("low-power",true));
+            check(DeviceProfile.loadSnapshot(snap).getBoolean("low-power"),"config snapshot rollback");
+
+            // KeyBindingScanner mod lang + runtime dump
+            File modDir=new File(data,"mods"); modDir.mkdirs();
+            try(ZipOutputStream z=new ZipOutputStream(new FileOutputStream(new File(modDir,"sample.jar")))){
+                z.putNextEntry(new ZipEntry("assets/demo/lang/zh_cn.json"));
+                z.write("{\"key.demo.fly\":\"飞行开关\"}".getBytes("UTF-8"));
+                z.closeEntry();
+            }
+            Map<String,String> labels=KeyBindingScanner.scanModKeyLabels(data);
+            check("飞行开关".equals(labels.get("key.demo.fly")),"scan mod zh_cn keybinding labels");
+            Files.write(new File(data,".lumen-keybindings.json").toPath(),
+                    "{\"bindings\":[{\"id\":\"key.demo.fly\",\"label\":\"飞行开关\",\"category\":\"模组\",\"fclCode\":33}]}".getBytes("UTF-8"));
+            check(KeyBindingScanner.readRuntimeBindings(data).size()==1,"read runtime keybinding bridge dump");
         } finally {
             try(java.util.stream.Stream<Path> files=Files.walk(root)){for(Path p:(Iterable<Path>)files.sorted(Comparator.reverseOrder())::iterator)Files.delete(p);}
         }

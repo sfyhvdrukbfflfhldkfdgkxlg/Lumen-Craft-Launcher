@@ -14,6 +14,6 @@ foreach ($a in $arch) {
     & $Rustc --edition 2021 --target $a[1] --crate-type lib --emit obj -C opt-level=2 -C panic=abort "$PSScriptRoot/topology.rs" -o $obj
     if ($LASTEXITCODE) { throw "Rust build failed" }
     $dst=New-Item -ItemType Directory -Force "$PSScriptRoot/../app/src/main/jniLibs/$($a[0])"
-    & $compiler "--target=$($a[2])" -fuse-ld=lld -std=c++17 -O2 -fPIC -shared -fno-exceptions -fno-rtti -nostdlib++ -Wall -Wextra -Werror '-Wl,--no-undefined,-z,max-page-size=16384,-soname,liblumengl.so' "$PSScriptRoot/legacy.cpp" "$PSScriptRoot/check.cpp" $obj -lEGL -lGLESv2 -o "$dst/liblumengl.so"
+    & $compiler "--target=$($a[2])" -fuse-ld=lld -std=c++17 -O2 -fPIC -shared -fno-exceptions -fno-rtti -nostdlib++ -Wall -Wextra -Werror '-Wl,--no-undefined,-z,max-page-size=16384,-soname,liblumengl.so' "$PSScriptRoot/legacy.cpp" "$PSScriptRoot/check.cpp" $obj -lEGL -lGLESv2 -lm -o "$dst/liblumengl.so"
     if ($LASTEXITCODE) { throw "NDK build failed" }
 }

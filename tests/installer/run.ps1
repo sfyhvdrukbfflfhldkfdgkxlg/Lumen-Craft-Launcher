@@ -11,7 +11,7 @@ if (!(Test-Path $json) -or (Get-FileHash $json).Hash -ne $expected) {
 }
 if ((Get-FileHash $json).Hash -ne $expected) { throw 'Test JSON dependency checksum mismatch' }
 $source = Join-Path $root 'core\src\main\java\dev\lumencraft\core'
-$files = @('VanillaInstaller.java','VerifiedDownloads.java','FabricInstaller.java','ClassicInstall.java') | ForEach-Object { Join-Path $source $_ }
+$files = @('MirrorBench.java','VanillaInstaller.java','VerifiedDownloads.java','FabricInstaller.java','ModLoaderInstaller.java','LaunchPlan.java','ServerDistributions.java','ClassicInstall.java') | ForEach-Object { Join-Path $source $_ }
 & javac --release 8 -Xlint:-options -encoding UTF-8 -cp $json -d $classes @files (Join-Path $PSScriptRoot 'InstallerTest.java')
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 $argsForTest = @()

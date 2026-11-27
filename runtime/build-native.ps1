@@ -9,7 +9,7 @@ $targets = [ordered]@{ 'arm64-v8a'='aarch64-linux-android21'; 'armeabi-v7a'='arm
 foreach ($pair in $targets.GetEnumerator()) {
     $out = New-Item -ItemType Directory -Force (Join-Path $jni $pair.Key)
     $flags = @("--target=$($pair.Value)",'-fuse-ld=lld','-O2','-Wall','-Wextra','-Werror','-fvisibility=hidden','-fstack-protector-strong','-ffunction-sections','-fdata-sections','-Wl,--gc-sections','-Wl,-z,relro,-z,now','-Wl,-z,max-page-size=16384','-nostdlib++','-fno-exceptions','-fno-rtti')
-    & $compiler @flags -shared -fPIC "$src/probe.cpp" -lEGL -lGLESv2 '-Wl,-soname,liblumencap.so' -o "$out/liblumencap.so"
+    & $compiler @flags -shared -fPIC "$src/probe.cpp" -lEGL -lGLESv2 -ldl '-Wl,-soname,liblumencap.so' -o "$out/liblumencap.so"
     if ($LASTEXITCODE) { throw "Graphics build failed: $($pair.Key)" }
     & $compiler @flags -fPIE -pie "$src/headless.cpp" -ldl -o "$out/liblumenjvm.so"
     if ($LASTEXITCODE) { throw "JVM host build failed: $($pair.Key)" }

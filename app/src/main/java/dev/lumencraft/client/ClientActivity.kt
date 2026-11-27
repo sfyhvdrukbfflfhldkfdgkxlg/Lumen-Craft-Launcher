@@ -130,8 +130,17 @@ class ClientActivity : Activity() {
                     val cause=e.localizedMessage ?: e.javaClass.simpleName
                     val tail=logTail(log)
                     val report=if(tail.isEmpty() || cause.endsWith(tail)) cause else cause+"\n"+tail
-                    val message=listOf(CrashNotes.explain(report),report).filter {it.isNotBlank()}.joinToString("\n\n")
-                    AlertDialog.Builder(this).setTitle("客户端诊断").setMessage(message).setPositiveButton("返回游戏页"){ _,_->finish() }.setOnCancelListener {finish()}.show()
+                    val diagnosis=CrashNotes.diagnose(report)
+                    val message=listOf(diagnosis.summary,report).filter {it.isNotBlank()}.joinToString("\n\n")
+                    val dialog=AlertDialog.Builder(this).setTitle("客户端诊断").setMessage(message)
+                        .setPositiveButton("返回游戏页"){ _,_->finish() }.setOnCancelListener {finish()}
+                    if (diagnosis.action == CrashNotes.RepairAction.LOWER_HEAP || diagnosis.action == CrashNotes.RepairAction.FALLBACK_RENDERER) {
+                        dialog.setNeutralButton(diagnosis.repairLabel) { _,_ ->
+                            getSharedPreferences("library", MODE_PRIVATE).edit().putBoolean("low-power", true).apply()
+                            finish()
+                        }
+                    }
+                    dialog.show()
                 }
             }
         } finally {

@@ -130,13 +130,18 @@ final class ControlProfile {
     }
 
     boolean addBinding(String name,int code,int x,int y)throws Exception{
+        return addBinding(name,name.substring(name.lastIndexOf('.')+1),code,x,y);
+    }
+    boolean addBinding(String name,String displayLabel,int code,int x,int y)throws Exception{
         String id=UUID.nameUUIDFromBytes(("minecraft-options/"+name).getBytes(StandardCharsets.UTF_8)).toString();
         for(Button b:buttons)if(id.equals(b.id))return false;
         if(buttons.size()>=256)throw new IOException("按键过多");
         JSONArray groups=document.getJSONArray("viewGroups");JSONObject target=null;
         for(int i=0;i<groups.length();i++) if("Lumen.bindings".equals(groups.getJSONObject(i).optString("name")))target=groups.getJSONObject(i);
         if(target==null) {target=group().put("name","Lumen.bindings");groups.put(target);}
-        JSONObject b=button(name.substring(name.lastIndexOf('.')+1),x,y,code).put("id",id);
+        String cleanLabel=(displayLabel==null||displayLabel.trim().isEmpty())?name.substring(name.lastIndexOf('.')+1):displayLabel.trim();
+        if(cleanLabel.length()>14)cleanLabel=cleanLabel.substring(0,14);
+        JSONObject b=button(cleanLabel,x,y,code).put("id",id);
         JSONArray styles=document.optJSONArray("buttonStyles");
         if(styles!=null && styles.length()>0)b.put("style",styles.getJSONObject(0).getString("name"));
         target.getJSONObject("viewData").getJSONArray("buttonList").put(b);

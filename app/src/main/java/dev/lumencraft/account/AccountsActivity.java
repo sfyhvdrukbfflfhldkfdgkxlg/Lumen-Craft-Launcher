@@ -15,8 +15,11 @@ import java.util.List;
 
 /** Account operations are only triggered by explicit user actions in this private Activity. */
 public final class AccountsActivity extends Activity {
+    private static final int PICK_SKIN = 52;
     private AccountVault vault;
     private final MicrosoftLogin api=new MicrosoftLogin();
+    private final YggdrasilLogin yggdrasil=new YggdrasilLogin();
+    private String skinTargetKey;
     private Thread worker;
     private AlertDialog pending;
     private int generation;
@@ -82,10 +85,13 @@ public final class AccountsActivity extends Activity {
         try {
             List<AccountVault.Profile> rows=vault.list();
             if (rows.isEmpty()) profiles.addView(text("本机尚未保存账户",16));
-            for (AccountVault.Profile p:rows)
-                addButton(profiles,p.name+"  ·  "+(p.online?"微软":"离线")+(p.selected?"  ·  当前":""),v->manage(p));
+            for (AccountVault.Profile p:rows) {
+                String badge = p.online ? "微软" : p.yggdrasil ? "第三方认证" : "离线";
+                addButton(profiles,p.name+"  ·  "+badge+(p.selected?"  ·  当前":""),v->manage(p));
+            }
             addButton(actions,"添加离线账户",v->offline());
             addButton(actions,"添加微软账户",v->microsoft());
+            addButton(actions,"添加第三方认证（Yggdrasil）",v->yggdrasilDialog());
         } catch (Exception e) {
             profiles.addView(text("账户库无法解密。请先解锁设备，再重新读取账户。",16));
             addButton(actions,"重新读取",v->render());
@@ -93,15 +99,89 @@ public final class AccountsActivity extends Activity {
         addButton(actions,"返回",v->finish());
     }
     private void manage(AccountVault.Profile p) {
-        String[] actions=p.online?new String[]{"切换到此账户","验证授权与游戏权益","移除此账户"}:
-                new String[]{"切换到此账户","移除此账户"};
-        new AlertDialog.Builder(this).setTitle(p.name).setItems(actions,(dialog,i)->{
-            if (i==0) local(()->vault.select(p.key));
-            else if (p.online && i==1) refresh(p);
+        java.util.ArrayList<String> actions=new java.util.ArrayList<>();
+        actions.add("切换到此账户");
+        if (p.online) actions.add("验证授权与游戏权益");
+        if (p.yggdrasil) actions.add("刷新第三方认证令牌");
+        actions.add("皮肤与披风信息");
+        if (!p.online && !p.yggdrasil) actions.add("导入本地皮肤 PNG");
+        actions.add("移除此账户");
+        new AlertDialog.Builder(this).setTitle(p.name).setItems(actions.toArray(new String[0]),(dialog,i)->{
+            String chosen=actions.get(i);
+            if ("切换到此账户".equals(chosen)) local(()->vault.select(p.key));
+            else if ("验证授权与游戏权益".equals(chosen)) refresh(p);
+            else if ("刷新第三方认证令牌".equals(chosen)) refreshYggdrasil(p);
+            else if ("皮肤与披风信息".equals(chosen)) showTextures(p);
+            else if ("导入本地皮肤 PNG".equals(chosen)) pickOfflineSkin(p);
             else new AlertDialog.Builder(this).setTitle("从本机移除 "+p.name+"？")
-                        .setMessage(p.online?"此操作清除本机保存的刷新凭据，可稍后重新登录。":"可用同一名称重新创建此本地身份。")
+                        .setMessage(p.online || p.yggdrasil?"此操作清除本机保存的刷新凭据，可稍后重新登录。":"可用同一名称重新创建此本地身份。")
                         .setNegativeButton("取消",null).setPositiveButton("移除",(d,n)->local(()->vault.remove(p.key))).show();
         }).show();
+    }
+    private void showTextures(AccountVault.Profile p) {
+        StringBuilder sb=new StringBuilder();
+        sb.append("UUID: ").append(p.id).append('\n');
+        sb.append("类型: ").append(p.online ? "Microsoft 正版" : p.yggdrasil ? "Yggdrasil 第三方认证" : "离线").append('\n');
+        if (!p.apiUrl.isEmpty()) sb.append("认证地址: ").append(p.apiUrl).append('\n');
+        sb.append("皮肤: ").append(p.skinUrl.isEmpty() ? "默认皮肤" : p.skinUrl).append('\n');
+        sb.append("披风: ").append(p.capeUrl.isEmpty() ? "无" : p.capeUrl);
+        new AlertDialog.Builder(this).setTitle(p.name + " · 外观档案").setMessage(sb.toString())
+                .setPositiveButton("关闭",null).show();
+    }
+    private void pickOfflineSkin(AccountVault.Profile p) {
+        skinTargetKey=p.key;
+        Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/png");
+        try { startActivityForResult(intent,PICK_SKIN); }
+        catch (ActivityNotFoundException e) { Toast.makeText(this,"系统缺少文件选择器",Toast.LENGTH_LONG).show(); }
+    }
+    @Override protected void onActivityResult(int req,int res,Intent data) {
+        super.onActivityResult(req,res,data);
+        if (req!=PICK_SKIN || res!=RESULT_OK || data==null || data.getData()==null || skinTargetKey==null) return;
+        String key=skinTargetKey; skinTargetKey=null;
+        local(()->{
+            java.io.File skins=new java.io.File(getFilesDir(),"skins");
+            if (!skins.isDirectory() && !skins.mkdirs()) throw new AccountProblem("无法创建皮肤目录");
+            java.io.File dst=new java.io.File(skins,key+".png");
+            try (java.io.InputStream in=getContentResolver().openInputStream(data.getData());
+                 java.io.OutputStream out=new java.io.FileOutputStream(dst)) {
+                if (in==null) throw new AccountProblem("无法读取皮肤文件");
+                byte[] buf=new byte[8192]; int total=0,n;
+                while ((n=in.read(buf))!=-1) {
+                    total+=n; if (total>2*1024*1024) throw new AccountProblem("皮肤 PNG 过大（上限 2 MiB）");
+                    out.write(buf,0,n);
+                }
+                if (total<32) throw new AccountProblem("皮肤文件不完整");
+            }
+            vault.setCustomSkin(key,dst.getAbsolutePath());
+        });
+    }
+    private void yggdrasilDialog() {
+        EditText apiField=field("认证服务器 HTTPS 地址（如 https://littleskin.cn/api/yggdrasil）","");
+        EditText userField=field("邮箱或用户名","");
+        EditText passField=field("密码","");
+        passField.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        showInput(new AlertDialog.Builder(this).setTitle("第三方认证（authlib-injector）")
+                .setView(dialogBody(text("支持合法的 Yggdrasil 第三方认证服务，凭据仅使用本机 Keystore 加密存储。",15),apiField,userField,passField))
+                .setNegativeButton("取消",null).setPositiveButton("登录",(d,w)->{
+                    String url=apiField.getText().toString().trim();
+                    String user=userField.getText().toString().trim();
+                    String pass=passField.getText().toString();
+                    start("第三方认证登录",token->{
+                        YggdrasilLogin.AuthResult auth=yggdrasil.authenticate(url,user,pass);
+                        ui(token,()->{ finishWork(); local(()->vault.storeYggdrasil(auth)); });
+                    });
+                }));
+    }
+    private void refreshYggdrasil(AccountVault.Profile p) {
+        start("刷新 "+p.name,token->{
+            AccountVault.Credential old=vault.credential(p.key);
+            YggdrasilLogin.AuthResult auth=yggdrasil.refresh(old.apiUrl,old.accessToken,old.clientToken,p.id,p.name);
+            ui(token,()->{
+                finishWork();
+                local(()->vault.storeYggdrasil(auth));
+                Toast.makeText(this,"第三方认证令牌与外观已更新",Toast.LENGTH_SHORT).show();
+            });
+        });
     }
     private interface Work { void run() throws Exception; }
     private void local(Work work) {
