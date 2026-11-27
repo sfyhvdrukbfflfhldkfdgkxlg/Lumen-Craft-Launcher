@@ -73,6 +73,11 @@ class MainActivity : Activity() {
     override fun onCreate(state: Bundle?) {
         Appearance.apply(this)
         super.onCreate(state)
+        runCatching {
+            val srcName = prefs.getString("download-source", "OFFICIAL") ?: "OFFICIAL"
+            val customUrl = prefs.getString("download-custom", "") ?: ""
+            MirrorBench.configure(MirrorBench.SourceId.valueOf(srcName), customUrl)
+        }
         page = state?.getInt("page")?.coerceIn(0, 4) ?: 0
         address = state?.getString("address").orEmpty()
         searchQuery = state?.getString("query").orEmpty()
@@ -381,9 +386,13 @@ class MainActivity : Activity() {
             },6)
         }
         body.place(button(if (server) "＋  安装服务端" else "＋  安装游戏文件", server) { catalog(server) },12)
-        if (!server) body.place(button("导入 Modrinth 整合包") {
+        if (!server) body.place(button("导入整合包（.mrpack / CurseForge / MultiMC / HMCL）") {
             pickFile(false,"*/*") { uri ->
-                job("导入整合包",{ update -> contentResolver.openInputStream(uri)!!.use { PackImport.install(root,it,progress(update)) } }) { render() }
+                job("导入整合包",{ update -> contentResolver.openInputStream(uri)!!.use { InstanceMigration.importAnyPack(root,it,progress(update)) } }) { summary ->
+                    render()
+                    val extra = if (summary.pendingExternalMods > 0) "\n\nCurseForge 列表含 ${summary.pendingExternalMods} 个外部模组，请在实例模组页补全或导入。" else ""
+                    note("整合包已导入", "${summary.name}\n格式 ${summary.format} · Minecraft ${summary.game} · ${summary.loader}\n已提取 ${summary.copiedFiles} 个文件$extra")
+                }
             }
         },8)
         body=installedPanel
@@ -411,8 +420,34 @@ class MainActivity : Activity() {
         })
         actions.add("重命名" to { ask("显示名称","实例名称",i.name) { prefs.edit().putString("title/" + i.dir.absolutePath,it.take(80)).apply(); render() } })
         if (!server) {
-            if (i.loader == "vanilla" && i.id !in ClassicInstall.versions()) actions.add("安装模组加载器" to { options("选择加载器",listOf("Fabric","Quilt")) { addLoader(i,if(it==0) "fabric" else "quilt") } })
-            actions.add("管理本地模组" to { mods(i) })
+            if (i.id !in ClassicInstall.versions()) {
+                actions.add("启动参数与兼容检查" to {
+                    job("装配启动计划",{
+                        val am=getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                        val mem=android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+                        val rec=DeviceProfile.recommend(mem.totalMem,mem.availMem,am.isLowRamDevice,false,"",true)
+                        LaunchPlan.build(root,i.dir,null,rec.heapMiB,1280,720)
+                    }) { plan ->
+                        note(i.name + " · 启动检查",
+                            "Minecraft ${plan.gameId} · ${plan.loader}\n主类 ${plan.mainClass}\nJava ${plan.javaMajor} · 推荐堆 ${plan.heapMiB} MiB\n类路径 ${plan.classpath.size} 个 JAR · JVM 参数 ${plan.jvmArgs.size} 项 · 游戏参数 ${plan.gameArgs.size} 项\n\n${plan.readinessNote}")
+                    }
+                })
+                actions.add("安装或切换模组加载器" to {
+                    val loaders = mutableListOf("Fabric","Quilt","NeoForge","Forge","LiteLoader","导入本地 OptiFine JAR")
+                    if (i.id == "1.12.2") loaders.add("Cleanroom")
+                    options("选择加载器", loaders) { n ->
+                        when (loaders[n]) {
+                            "导入本地 OptiFine JAR" -> pickFile(false,"*/*") { uri ->
+                                job("校验并安装 OptiFine",{ update -> contentResolver.openInputStream(uri)!!.use { ModLoaderInstaller.installLocalOptiFine(root,i.dir,it,progress(update)) } }) { ver ->
+                                    render(); note("OptiFine 已安装", ver)
+                                }
+                            }
+                            else -> addLoader(i, loaders[n].lowercase(Locale.ROOT))
+                        }
+                    }
+                })
+            }
+            actions.add("模组管理与依赖补全" to { mods(i) })
             actions.add("导出存档备份" to { exportWorlds(i) })
             actions.add("恢复存档备份" to { restoreWorlds(i) })
             actions.add("复制实例" to {
@@ -441,13 +476,19 @@ class MainActivity : Activity() {
                 else options("选择 Minecraft 版本",ids) { idx ->
                     val id = ids[idx]
                     if (server) {
-                        val engines=mutableListOf("Vanilla","Fabric")
+                        val engines=mutableListOf("Vanilla","Fabric","Paper")
                         if(ServerDistributions.supportsPurpur(id)) engines.add("Purpur")
+                        engines.add("NeoForge"); engines.add("Forge")
                         options("服务端组件",engines) { e -> serverInstall(id,engines[e].lowercase(Locale.ROOT)) }
                     }
-                    else options("安装 $id", listOf("原版游戏文件","游戏文件 + Fabric","游戏文件 + Quilt")) { n ->
-                        val loader=listOf(null,"fabric","quilt")[n]
-                        install(id, if(loader==null) id else "$id-$loader",false,loader)
+                    else {
+                        val choices = mutableListOf("原版游戏文件","游戏文件 + Fabric","游戏文件 + Quilt","游戏文件 + NeoForge","游戏文件 + Forge","游戏文件 + LiteLoader")
+                        val idsLoader = mutableListOf<String?>(null,"fabric","quilt","neoforge","forge","liteloader")
+                        if (id == "1.12.2") { choices.add("游戏文件 + Cleanroom"); idsLoader.add("cleanroom") }
+                        options("安装 $id", choices) { n ->
+                            val loader=idsLoader[n]
+                            install(id, if(loader==null) id else "$id-$loader",false,loader)
+                        }
                     }
                 }
             }
@@ -456,21 +497,25 @@ class MainActivity : Activity() {
     private fun install(id: String, name: String, server: Boolean, loader: String?, display: String? = null) {
         job("安装并校验文件", { update ->
             val dir = installer.install(id,name,server,progress(update))
-            if (loader!=null) FabricInstaller.install(root,dir,id,loader,progress(update))
+            if (loader!=null) ModLoaderInstaller.install(root,dir,id,loader,null,progress(update))
             if (display != null) prefs.edit().putString("title/" + dir.absolutePath, display).apply()
             dir
         }) { page = if (server) 3 else 0; render(); Toast.makeText(this,"文件已就绪",Toast.LENGTH_SHORT).show() }
     }
     private fun addLoader(i: Instance,loader:String) {
-        job("安装 $loader", { update -> FabricInstaller.install(root,i.dir,i.id,loader,progress(update)) }) { render(); note("加载器已安装",it.toString()) }
+        job("安装 $loader", { update -> ModLoaderInstaller.install(root,i.dir,i.id,loader,null,progress(update)) }) { render(); note("加载器已安装",it.toString()) }
     }
     private fun serverInstall(game:String,engine:String) {
         if(engine=="vanilla") {install(game,game,true,null);return}
         job("安装服务端组件",{update ->
             val service=ServerDistributions(root)
-            if(engine=="fabric") service.installFabric(game,progress(update))
-            else if(engine=="purpur") service.installPurpur(game,progress(update))
-            else error("未知服务端组件")
+            when (engine) {
+                "fabric" -> service.installFabric(game,progress(update))
+                "paper" -> service.installPaper(game,progress(update))
+                "purpur" -> service.installPurpur(game,progress(update))
+                "neoforge", "forge" -> service.installModdedServer(game,engine,progress(update))
+                else -> error("未知服务端组件")
+            }
         }) {page=3;render()}
     }
     private val types = listOf("mod","resourcepack","shader","modpack","datapack")
@@ -531,7 +576,8 @@ class MainActivity : Activity() {
             }
         },8)
         status?.let { s ->
-            val box=card(s.address,"${s.motd}\n\n${s.versionName}   ·   协议 ${s.protocol}\n${s.online} / ${s.max} 人   ·   ${s.latencyMs} ms" + (s.loaderHint?.takeIf { it.isNotBlank() }?.let { "\n加载器提示 $it" } ?: ""))
+            val modSummary = if (s.advertisedMods.isNotEmpty()) "\n服务端声明模组 ${s.advertisedMods.size} 个" else ""
+            val box=card(s.address,"${s.motd}\n\n${s.versionName}   ·   协议 ${s.protocol}\n${s.online} / ${s.max} 人   ·   ${s.latencyMs} ms" + (s.loaderHint?.takeIf { it.isNotBlank() }?.let { "\n加载器提示 $it" } ?: "") + modSummary)
             box.place(button("查找服务器整合包") {
                 job("读取服务器发布的清单",{ ServerPack.discover(s.address,s.versionName,installer.versions()) }) { pack ->
                     dialogBuilder().setTitle(pack.name)
@@ -544,6 +590,21 @@ class MainActivity : Activity() {
                         }.show()
                 }
             },12)
+            box.place(button("同步 AutoModpack 清单") {
+                ask("AutoModpack 清单地址","https://服务器地址/automodpack/content.json") { url ->
+                    job("解析 AutoModpack 清单",{ AutoModpackSync.fetchManifest(url) }) { manifest ->
+                        dialogBuilder().setTitle(manifest.modpackName)
+                            .setMessage("Minecraft ${manifest.mcVersion} · ${manifest.loader}\n共 ${manifest.files.size} 个客户端同步文件。")
+                            .setNegativeButton("取消",null).setPositiveButton("同步") { _,_ ->
+                                job("同步 AutoModpack",{ update -> AutoModpackSync.sync(root,s.address,manifest,progress(update)) }) { res ->
+                                    prefs.edit().putString("title/"+res.instanceDir.absolutePath,s.address+" · "+manifest.modpackName).apply()
+                                    page=0;render()
+                                    note("同步完成","已下载 ${res.downloaded} 个文件，复用 ${res.reused} 个，跳过纯服务端 ${res.skippedServerOnly} 个。")
+                                }
+                            }.show()
+                    }
+                }
+            },8)
             box.place(button("按报告版本准备游戏文件") {
                 job("核对官方版本",{ s.exactVersion(installer.versions().map { it.id }) ?: error("服务器没有报告唯一的官方版本。请从游戏页手动选择。") }) { id ->
                     dialogBuilder().setTitle("准备 $id 的基础文件？")
@@ -614,7 +675,7 @@ class MainActivity : Activity() {
         body.place(group)
         populateAdvanced(group)
         card("版本与兼容范围","LumenCraft " + packageManager.getPackageInfo(packageName,0).versionName) {
-            note("此版本的范围","远古客户端适配 "+ClassicInstall.versions().joinToString("、")+"。其他游戏版本目前支持文件准备。服务端使用独立 OpenJDK 进程。\n\nFabric、Quilt 和 Modrinth 已接入。陶瓦房间可从联机页打开。现代 LWJGL 客户端和完整桌面 OpenGL 仍待实现。")
+            note("此版本的范围","远古客户端适配 "+ClassicInstall.versions().joinToString("、")+"。其他游戏版本支持完整文件校验、加载器安装与启动计划装配。服务端支持 Vanilla、Fabric、Paper、Purpur、NeoForge 与 Forge 独立 OpenJDK 进程。\n\nFabric、Quilt、NeoForge、Forge、LiteLoader、Cleanroom、本地 OptiFine、Modrinth、AutoModpack 与多格式整合包已接入。图形层包含扩展 GLES 2 固定管线、Rust GLSL 转换器与动态 Vulkan 探测。现代 LWJGL 3 实机窗口渲染仍待后续适配。")
         }
     }
     private fun populateAdvanced(group: LinearLayout) {
@@ -630,12 +691,70 @@ class MainActivity : Activity() {
             val power=getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
             val thermal=if(Build.VERSION.SDK_INT>=29) "\n系统热状态 "+(listOf("正常","轻微","中等","严重","临界","紧急","关机").getOrNull(power.currentThermalStatus) ?: "未知") else ""
             card("设备状态","可用内存 %.0f / %.0f MiB".format(Locale.ROOT,mem.availMem/1048576.0,mem.totalMem/1048576.0)+thermal)
-            val limited=prefs.getBoolean("low-power",false)
-            card("远古版省电模式",if(limited) "已开启，下一次启动上限 15 FPS" else "自动，系统省电或低内存设备上限 15 FPS，其他设备上限 30 FPS"){
-                options("远古版帧率",listOf("自动","始终省电 · 15 FPS")){n->prefs.edit().putBoolean("low-power",n==1).apply();render()}
+            card("下载源与测速",MirrorBench.activeSource().label + if(MirrorBench.activeSource()==MirrorBench.SourceId.CUSTOM) " · "+MirrorBench.customBaseUrl() else "") {
+                options("下载源配置",listOf("自动测速并选择最快源","官方源 (Mojang)","BMCLAPI 镜像（自动校对官方摘要）","设置自定义 HTTPS 源")) { n ->
+                    when (n) {
+                        0 -> job("测速下载源",{ MirrorBench.benchmark(prefs.getString("download-custom","")) }) { list ->
+                            val best = list.firstOrNull { it.reachable }
+                            if (best != null) {
+                                MirrorBench.configure(best.id, prefs.getString("download-custom",""))
+                                prefs.edit().putString("download-source", best.id.name).apply()
+                            }
+                            render()
+                            note("下载源测速结果", list.joinToString("\n") {
+                                it.id.label + "：" + if (it.reachable) "${it.latencyMs} ms" else "不可达 (${it.error})"
+                            } + if (best != null) "\n\n已自动选用：${best.id.label}" else "")
+                        }
+                        1 -> { MirrorBench.configure(MirrorBench.SourceId.OFFICIAL,""); prefs.edit().putString("download-source","OFFICIAL").apply(); render() }
+                        2 -> { MirrorBench.configure(MirrorBench.SourceId.BMCLAPI,""); prefs.edit().putString("download-source","BMCLAPI").apply(); render() }
+                        3 -> ask("自定义下载源","https://your-mirror.example",prefs.getString("download-custom","")?:"") { url ->
+                            runCatching {
+                                MirrorBench.configure(MirrorBench.SourceId.CUSTOM, url)
+                                prefs.edit().putString("download-source","CUSTOM").putString("download-custom",MirrorBench.customBaseUrl()).apply()
+                                render()
+                            }.onFailure { note("下载源无效", it.localizedMessage ?: "格式错误") }
+                        }
+                    }
+                }
             }
-            card("图形能力检测","创建 EGL 上下文并查询设备驱动。") {
-                job("读取图形驱动",{ GraphicsProbe.inspect()+"\n"+LegacyGraphics.check() }) { note("设备报告",it) }
+            val limited=prefs.getBoolean("low-power",false)
+            card("性能推荐与配置回滚",if(limited) "省电模式 · 15 FPS" else "自动按硬件与热状态调整") {
+                options("性能与配置",listOf("查看硬件推荐参数","切换省电模式（当前：" + (if(limited)"15 FPS" else "自动") + "）","保存当前配置快照","回滚到上次配置快照")) { n ->
+                    when (n) {
+                        0 -> job("评估设备性能与图形后端",{
+                            val probe = GraphicsProbe.inspect()
+                            val rec = DeviceProfile.recommend(mem.totalMem,mem.availMem,am.isLowRamDevice,power.isPowerSaveMode,probe,true)
+                            "推荐堆内存：${rec.heapMiB} MiB\n目标帧率：${rec.maxFps} FPS\n分辨率比例：${(rec.resolutionScale*100).toInt()}%\n推荐后端：${rec.rendererBackend}\n说明：${rec.reason}"
+                        }) { note("硬件性能评估",it) }
+                        1 -> { prefs.edit().putBoolean("low-power",!limited).apply(); render() }
+                        2 -> runCatching {
+                            val snap = JSONObject().put("appearance",Appearance.mode(this)).put("motion",prefs.getBoolean("motion",true))
+                                .put("low-power",limited).put("download-source",MirrorBench.activeSource().name)
+                                .put("download-custom",MirrorBench.customBaseUrl())
+                            DeviceProfile.saveSnapshot(File(root,"config-snapshot.json"), snap)
+                            Toast.makeText(this,"已保存安全配置快照",Toast.LENGTH_SHORT).show()
+                        }.onFailure { note("保存失败",it.localizedMessage ?: "错误") }
+                        3 -> runCatching {
+                            val snap = DeviceProfile.loadSnapshot(File(root,"config-snapshot.json"))
+                            prefs.edit().putInt("appearance",snap.optInt("appearance",0)).putBoolean("motion",snap.optBoolean("motion",true))
+                                .putBoolean("low-power",snap.optBoolean("low-power",false))
+                                .putString("download-source",snap.optString("download-source","OFFICIAL"))
+                                .putString("download-custom",snap.optString("download-custom","")).apply()
+                            MirrorBench.configure(MirrorBench.SourceId.valueOf(snap.optString("download-source","OFFICIAL")), snap.optString("download-custom",""))
+                            recreate()
+                        }.onFailure { note("回滚失败",it.localizedMessage ?: "没有可用快照") }
+                    }
+                }
+            }
+            card("glibc 兼容层",if(dev.lumencraft.runtime.RuntimeStore.hasGlibcCompat(this)) "已配置独立 glibc 兼容目录" else "未导入（可选，点击导入兼容包 ZIP）") {
+                pickFile(false,"application/zip") { uri ->
+                    job("导入 glibc 兼容包",{ dev.lumencraft.runtime.RuntimeStore.importGlibcCompat(this,uri) }) { count ->
+                        render(); note("glibc 兼容目录已就绪","已提取 $count 项到独立运行目录，将在后续进程中挂载。")
+                    }
+                }
+            }
+            card("图形能力检测","检测 EGL/GLES、Vulkan 硬件支持与 LumenGL 像素/着色器转换。") {
+                job("读取图形驱动",{ GraphicsProbe.inspect()+"\n\n"+LegacyGraphics.check() }) { note("设备图形报告",it) }
             }
             card("存储","应用私有目录  ·  可用 %.1f GiB".format(Locale.ROOT,filesDir.usableSpace / 1073741824.0)) {
                 job("统计本地文件",{ root.walkTopDown().filter { it.isFile }.fold(0L) { sum,f -> sum + f.length() } }) { n ->
@@ -646,15 +765,52 @@ class MainActivity : Activity() {
     }
     private fun mods(i:Instance) {
         val dir = File(i.dir,"mods")
-        val files = dir.listFiles().orEmpty().filter { it.isFile && (it.name.endsWith(".jar",true) || it.name.endsWith(".jar.disabled",true)) }.sortedBy {it.name}
-        options("实例模组",listOf("导入本地 JAR")+files.map{it.name}) { n ->
-            if(n==0) pickFile(false,"application/octet-stream",arrayOf("application/java-archive","application/zip","application/octet-stream","application/x-java-archive","*/*")) { uri ->
-                job("导入本地模组",{ contentResolver.openInputStream(uri)!!.use { LocalFiles.importJar(it,dir) } }) {f->note("已导入",f.name)}
+        val list = runCatching { ModManager.listMods(i.dir) }.getOrDefault(emptyList())
+        val rollbacks = ModManager.listRollbacks(i.dir)
+        val header = mutableListOf("＋ 导入本地 JAR","诊断冲突与缺失前置","一键补全已安装模组前置","批量更新未锁定模组")
+        if (rollbacks.isNotEmpty()) header.add("回滚上次批量更新（${rollbacks.size} 个记录）")
+        val items = header + list.map { m ->
+            val state = (if(m.enabled) "" else "[已停用] ") + (if(m.locked) "[锁定] " else "")
+            val ver = if(m.version.isNotEmpty()) " ${m.version}" else ""
+            "$state${m.name}$ver (${m.environment})"
+        }
+        options("实例模组 · ${list.size}", items) { n ->
+            if (n == 0) pickFile(false,"application/octet-stream",arrayOf("application/java-archive","application/zip","application/octet-stream","application/x-java-archive","*/*")) { uri ->
+                job("导入本地模组",{ contentResolver.openInputStream(uri)!!.use { LocalFiles.importJar(it,dir) } }) { f -> note("已导入",f.name) }
+            } else if (n == 1) {
+                job("诊断实例模组",{ ModManager.auditMods(i.dir).summary() }) { note("模组诊断报告",it) }
+            } else if (n == 2) {
+                if (i.loader == "vanilla") note("缺少加载器","请先为此实例安装模组加载器。")
+                else job("补全缺失前置",{ ModManager.completeDependencies(i.dir,i.id,i.loader) }) { added ->
+                    note("前置补全完成", if(added.isEmpty()) "所有可识别模组的前置依赖均已满足。" else added.joinToString("\n") { it.name })
+                }
+            } else if (n == 3) {
+                if (i.loader == "vanilla") note("缺少加载器","请先为此实例安装模组加载器。")
+                else job("批量更新模组",{ ModManager.updateAll(i.dir,i.id,i.loader) }) { res ->
+                    note("批量更新结果", "已更新 ${res.updated} 个，已是最新 ${res.upToDate} 个，跳过锁定 ${res.skippedLocked} 个" +
+                            if(res.details.isNotEmpty()) "\n\n" + res.details.joinToString("\n") else "")
+                }
+            } else if (rollbacks.isNotEmpty() && n == 4) {
+                options("选择回滚点", rollbacks) { k ->
+                    job("回滚模组",{ ModManager.rollback(i.dir, rollbacks[k]) }) { count ->
+                        note("已回滚","已恢复 $count 个模组文件及索引快照。")
+                    }
+                }
             } else {
-                val f=files[n-1];val disabled=f.name.endsWith(".disabled")
-                options(f.name,listOf(if(disabled) "启用模组" else "停用模组")) {
-                    val out=File(dir,if(disabled) f.name.removeSuffix(".disabled") else f.name+".disabled")
-                    if(out.exists() || !f.renameTo(out)) note("操作未完成","目标文件已存在或文件不可写。") else mods(i)
+                val m = list[n - header.size]
+                val actions = mutableListOf(if(m.enabled) "停用模组" else "启用模组", "查看模组详情")
+                if (m.modrinthProject.isNotEmpty()) actions.add(if(m.locked) "解除版本锁定" else "锁定当前版本")
+                actions.add("删除模组")
+                options(m.name, actions) { act ->
+                    when (actions[act]) {
+                        "启用模组", "停用模组" -> {
+                            val out=File(dir,if(!m.enabled) m.file.name.removeSuffix(".disabled") else m.file.name+".disabled")
+                            if(out.exists() || !m.file.renameTo(out)) note("操作未完成","目标文件已存在或文件不可写。") else mods(i)
+                        }
+                        "查看模组详情" -> note(m.name, "ID: ${m.modId}\n版本: ${m.version}\n加载器: ${m.loaderType}\n环境: ${m.environment}\n文件: ${m.file.name}\n\n${m.description}")
+                        "锁定当前版本", "解除版本锁定" -> runCatching { ModManager.setLocked(i.dir,m.modrinthProject,!m.locked); mods(i) }.onFailure { note("操作失败",it.localizedMessage ?: "错误") }
+                        "删除模组" -> runCatching { ModManager.deleteMod(i.dir,m.file); mods(i) }.onFailure { note("删除失败",it.localizedMessage ?: "错误") }
+                    }
                 }
             }
         }
