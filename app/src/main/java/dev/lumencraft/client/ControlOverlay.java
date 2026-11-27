@@ -4,16 +4,21 @@ import android.app.*;
 import android.content.*;
 import android.graphics.*;
 import android.graphics.drawable.GradientDrawable;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.os.*;
 import android.util.AtomicFile;
 import android.view.*;
 import android.widget.*;
+import dev.lumencraft.core.KeyBindingScanner;
 import org.json.*;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
-/** Multitouch input and in-game editor. All input ownership is maintained on the main thread. */
+/** Multitouch, physical keyboard/mouse, gamepad, gyroscope, and in-game FCL layout editor. */
 public final class ControlOverlay extends FrameLayout {
     public interface Sink { void event(int kind,int a,int b); }
     private static final int OPEN=8110, SAVE=8111;
@@ -25,6 +30,7 @@ public final class ControlOverlay extends FrameLayout {
     private final Map<Integer,Integer> counts=new HashMap<>();
     private final Map<Long,Integer> physicalKeys=new HashMap<>();
     private final Map<Integer,Touch> touches=new LinkedHashMap<>();
+    private final Set<Integer> gamepadKeys=new HashSet<>();
     private final Pad pad;
     private final TextView menu;
     private ControlProfile profile;
@@ -35,9 +41,24 @@ public final class ControlOverlay extends FrameLayout {
     private int mouseButtons;
     private boolean hasHover;
     private float hoverX,hoverY;
+    private float gyroRemX,gyroRemY;
+    private boolean gyroEnabled;
+    private SensorManager sensorManager;
+    private final SensorEventListener gyroListener=new SensorEventListener() {
+        @Override public void onSensorChanged(SensorEvent event) {
+            if (!gyroEnabled || editing || !grabbed || event.values.length < 2) return;
+            gyroRemX += -event.values[1] * 8.5f;
+            gyroRemY += event.values[0] * 8.5f;
+            int dx = (int) gyroRemX, dy = (int) gyroRemY;
+            gyroRemX -= dx; gyroRemY -= dy;
+            if (dx != 0 || dy != 0) sink.event(2, dx, dy);
+        }
+        @Override public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+    };
 
     public ControlOverlay(Activity activity,File instance,Sink sink){
         super(activity);this.activity=activity;this.instance=instance;this.sink=sink;
+        sensorManager=(SensorManager)activity.getSystemService(Context.SENSOR_SERVICE);
         layout=new AtomicFile(new File(instance,"controls-v21.json"));
         try{
             profile=ControlProfile.defaults();
@@ -55,6 +76,22 @@ public final class ControlOverlay extends FrameLayout {
     public void setGrabbed(boolean value){
         if(Looper.myLooper()!=Looper.getMainLooper()){post(()->setGrabbed(value));return;}
         if(grabbed!=value){releaseAll();grabbed=value;pad.invalidate();}
+    }
+
+    private void setGyroscope(boolean enable) {
+        if (sensorManager == null) { message("当前设备不支持陀螺仪传感器"); return; }
+        Sensor gyro = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
+        if (gyro == null) { message("当前设备未检测到陀螺仪"); return; }
+        if (enable == gyroEnabled) return;
+        gyroEnabled = enable;
+        gyroRemX = 0; gyroRemY = 0;
+        if (enable) {
+            sensorManager.registerListener(gyroListener, gyro, SensorManager.SENSOR_DELAY_GAME);
+            message("已开启陀螺仪视角辅助");
+        } else {
+            sensorManager.unregisterListener(gyroListener);
+            message("已关闭陀螺仪视角辅助");
+        }
     }
 
     private int dp(float n){return Math.round(getResources().getDisplayMetrics().density*n);}
@@ -102,7 +139,8 @@ public final class ControlOverlay extends FrameLayout {
         return true;
     }
     public void releaseAll(){
-        handler.removeCallbacksAndMessages(null);touches.clear();physicalKeys.clear();lastTap="";
+        handler.removeCallbacksAndMessages(null);touches.clear();physicalKeys.clear();gamepadKeys.clear();lastTap="";
+        if (sensorManager != null && gyroEnabled) sensorManager.unregisterListener(gyroListener);
         for(int code:new ArrayList<>(counts.keySet())){
             if(code>=1000)sink.event(3,code==1000?0:code==1002?1:2,0);
             else sink.event(1,code,0);
@@ -110,7 +148,43 @@ public final class ControlOverlay extends FrameLayout {
         counts.clear();hasHover=false;mouseButtons=0;
         if(pad!=null)pad.invalidate();
     }
-    @Override protected void onDetachedFromWindow(){releaseAll();super.onDetachedFromWindow();}
+    @Override protected void onDetachedFromWindow(){
+        if (sensorManager != null) sensorManager.unregisterListener(gyroListener);
+        gyroEnabled = false;
+        releaseAll();
+        super.onDetachedFromWindow();
+    }
+
+    private void syncGamepadKey(int fcl, boolean active) {
+        if (active && gamepadKeys.add(fcl)) set(fcl, true);
+        else if (!active && gamepadKeys.remove(fcl)) set(fcl, false);
+    }
+
+    private boolean gamepadMotion(MotionEvent e) {
+        if (editing || !e.isFromSource(InputDevice.SOURCE_JOYSTICK)) return false;
+        float lx = e.getAxisValue(MotionEvent.AXIS_X);
+        float ly = e.getAxisValue(MotionEvent.AXIS_Y);
+        float hatX = e.getAxisValue(MotionEvent.AXIS_HAT_X);
+        float hatY = e.getAxisValue(MotionEvent.AXIS_HAT_Y);
+        float moveX = Math.abs(hatX) > 0.4f ? hatX : lx;
+        float moveY = Math.abs(hatY) > 0.4f ? hatY : ly;
+        syncGamepadKey(17, moveY < -0.35f); // W
+        syncGamepadKey(31, moveY > 0.35f);  // S
+        syncGamepadKey(30, moveX < -0.35f); // A
+        syncGamepadKey(32, moveX > 0.35f);  // D
+
+        float rx = e.getAxisValue(MotionEvent.AXIS_Z);
+        float ry = e.getAxisValue(MotionEvent.AXIS_RZ);
+        if (Math.abs(rx) > 0.15f || Math.abs(ry) > 0.15f) {
+            sink.event(2, Math.round(rx * 14f), Math.round(-ry * 14f));
+        }
+        float lt = Math.max(e.getAxisValue(MotionEvent.AXIS_LTRIGGER), e.getAxisValue(MotionEvent.AXIS_BRAKE));
+        float rt = Math.max(e.getAxisValue(MotionEvent.AXIS_RTRIGGER), e.getAxisValue(MotionEvent.AXIS_GAS));
+        syncGamepadKey(1002, lt > 0.45f);
+        syncGamepadKey(1000, rt > 0.45f);
+        return true;
+    }
+
     private final class Touch{
         final int pointer;final ControlProfile.Button b;
         final Map<Integer,Integer> owned=new HashMap<>();final Set<Integer> stick=new HashSet<>();
@@ -213,7 +287,7 @@ public final class ControlOverlay extends FrameLayout {
                 int dx=Math.round(e.getX()-hoverX),dy=Math.round(hoverY-e.getY());if(dx!=0||dy!=0)sink.event(2,dx,dy);}
             hoverX=e.getX();hoverY=e.getY();hasHover=action!=MotionEvent.ACTION_HOVER_EXIT;return true;
         }
-        public boolean onGenericMotionEvent(MotionEvent e){return externalMouse(e)||super.onGenericMotionEvent(e);}
+        public boolean onGenericMotionEvent(MotionEvent e){return gamepadMotion(e)||externalMouse(e)||super.onGenericMotionEvent(e);}
         public boolean onHoverEvent(MotionEvent e){return externalMouse(e)||super.onHoverEvent(e);}
         public boolean onTouchEvent(MotionEvent e){
             if(profile==null)return false;
@@ -237,30 +311,60 @@ public final class ControlOverlay extends FrameLayout {
                 }catch(Exception e){message("保存失败。"+e.getMessage());}
             }).show();return;
         }
-        new AlertDialog.Builder(activity).setTitle("实例按键").setItems(new String[]{"拖动调整布局","从 options.txt 添加按键","导入 FCL 布局","导出 FCL 布局"},(dialog,n)->{
+        String[] menuItems = new String[]{
+                "拖动调整布局",
+                "智能识别游戏/模组按键",
+                gyroEnabled ? "关闭陀螺仪视角" : "开启陀螺仪视角",
+                "导入 FCL 布局",
+                "导出 FCL 布局"
+        };
+        new AlertDialog.Builder(activity).setTitle("实例按键").setItems(menuItems,(dialog,n)->{
             if(n==0){beforeEdit=profile.document.toString();editing=true;menu.setText("完成");pad.invalidate();message("拖动按键或方向盘，点「完成」保存");}
-            else if(n==1)bindingsDialog();else document(n==2);
+            else if(n==1)bindingsDialog();
+            else if(n==2)setGyroscope(!gyroEnabled);
+            else document(n==3);
         }).show();
     }
 
     private void bindingsDialog(){
         try{
-            Map<String,Integer> map=ControlProfile.bindings(new File(instance,"options.txt"));
-            if(map.isEmpty()){message("该实例尚无可识别的 options.txt 按键记录");return;}
-            List<String> keys=new ArrayList<>(map.keySet());Collections.sort(keys);
-            Map<Integer,Integer> freq=new HashMap<>();for(int code:map.values())freq.put(code,(freq.containsKey(code)?freq.get(code):0)+1);
-            String[] labels=new String[keys.size()];boolean[] selected=new boolean[keys.size()];
-            for(int i=0;i<labels.length;i++){int key=map.get(keys.get(i));labels[i]=keys.get(i)+(freq.get(key)>1?"  ·  共用键位":"");}
-            new AlertDialog.Builder(activity).setTitle("选择要添加的绑定").setMultiChoiceItems(labels,selected,(d,w,c)->selected[w]=c)
-                .setNegativeButton("取消",null).setPositiveButton("添加",(d,w)->{
+            Map<String,Integer> optionMap=ControlProfile.bindings(new File(instance,"options.txt"));
+            Map<String,String> modLabels=KeyBindingScanner.scanModKeyLabels(instance);
+            List<KeyBindingScanner.DiscoveredKey> discovered=new ArrayList<>();
+            Set<String> seen=new HashSet<>();
+            for(KeyBindingScanner.DiscoveredKey rt:KeyBindingScanner.readRuntimeBindings(instance)){
+                seen.add(rt.keyId);
+                discovered.add(rt);
+            }
+            List<String> keys=new ArrayList<>(optionMap.keySet());Collections.sort(keys);
+            for(String k:keys){
+                if(!seen.add(k))continue;
+                String label=modLabels.containsKey(k)?modLabels.get(k):modLabels.containsKey("key."+k)?modLabels.get("key."+k):KeyBindingScanner.shortName(k);
+                discovered.add(new KeyBindingScanner.DiscoveredKey(k,label,KeyBindingScanner.categorize(k),optionMap.get(k),false));
+            }
+            if(discovered.isEmpty()){message("该实例尚无可识别的运行时或 options.txt 按键记录");return;}
+            discovered.sort((a,b)->{
+                int c=a.category.compareTo(b.category);
+                return c!=0?c:a.displayName.compareToIgnoreCase(b.displayName);
+            });
+            Map<Integer,Integer> freq=new HashMap<>();
+            for(KeyBindingScanner.DiscoveredKey dk:discovered)freq.put(dk.fclCode,(freq.containsKey(dk.fclCode)?freq.get(dk.fclCode):0)+1);
+            String[] labels=new String[discovered.size()];boolean[] selected=new boolean[discovered.size()];
+            for(int i=0;i<labels.length;i++){
+                KeyBindingScanner.DiscoveredKey dk=discovered.get(i);
+                labels[i]="["+dk.category+"] "+dk.displayName+(dk.runtimeConfirmed?" · 运行时":"")+(freq.get(dk.fclCode)>1?" · 键位冲突":"");
+            }
+            new AlertDialog.Builder(activity).setTitle("选择要生成的虚拟按键").setMultiChoiceItems(labels,selected,(d,w,c)->selected[w]=c)
+                .setNegativeButton("取消",null).setPositiveButton("生成按键",(d,w)->{
                     try{
                         ControlProfile original=profile;profile=new ControlProfile(new JSONObject(original.document.toString()));int added=0,full=0;
-                        try{for(int i=0;i<keys.size();i++)if(selected[i]){
-                            String k=keys.get(i);int[] pos=freePosition();if(pos==null){full++;continue;}
-                            if(profile.addBinding(k,map.get(k),pos[0],pos[1]))added++;}
+                        try{for(int i=0;i<discovered.size();i++)if(selected[i]){
+                            KeyBindingScanner.DiscoveredKey dk=discovered.get(i);
+                            int[] pos=freePosition();if(pos==null){full++;continue;}
+                            if(profile.addBinding(dk.keyId,dk.displayName,dk.fclCode,pos[0],pos[1]))added++;}
                             save(profile);
                         }catch(Exception e){profile=original;throw e;}
-                        message("新增 "+added+" 个按键"+(full>0?"，屏幕空间不足 "+full+" 个":""));pad.invalidate();
+                        message("新增 "+added+" 个按键（未覆盖已有布局）"+(full>0?"，屏幕空间不足 "+full+" 个":""));pad.invalidate();
                     }catch(Exception e){message(e.getMessage());}
                 }).show();
         }catch(Exception e){message(e.getMessage());}
