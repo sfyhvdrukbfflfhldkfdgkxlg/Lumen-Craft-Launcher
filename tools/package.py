@@ -120,7 +120,7 @@ def verify(folder):
 
 def check_candidate(folder):
     expected = verify(folder)
-    require((folder / "SHA256SUMS.txt").read_text(encoding="ascii") == expected, "SHA256SUMS.txt mismatch")
+    require((folder / "SHA256SUMS.txt").read_bytes() == expected.encode("ascii"), "SHA256SUMS.txt bytes differ from the release manifest")
     allowed = {"SHA256SUMS.txt", *(apk_name(abi) for abi in ABIS | {"universal"})}
     require({p.name for p in folder.iterdir()} == allowed, "Unexpected file in the APK release directory")
     print(expected, end="")

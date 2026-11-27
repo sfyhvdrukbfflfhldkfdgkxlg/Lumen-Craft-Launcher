@@ -3,6 +3,7 @@ app/src/main/assets/** -text
 rooms/src/main/assets/** -text
 *.so binary
 *.apk binary
+dist/**/SHA256SUMS.txt -text
 *.jar binary
 *.gz binary
 *.png binary
