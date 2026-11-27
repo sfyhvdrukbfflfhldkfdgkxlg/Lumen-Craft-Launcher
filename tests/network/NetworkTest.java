@@ -25,6 +25,7 @@ public final class NetworkTest {
         endpointAndSrv();
         status();
         installer();
+        roomInvites();
         if (Arrays.asList(args).contains("--live")) live();
         System.out.println("Passed "+passed+" checks");
     }
@@ -117,10 +118,55 @@ public final class NetworkTest {
                 .put("files",new JSONArray().put(f)).put("dependencies",deps)
                 .put("game_versions",new JSONArray().put("1.20.1")).put("loaders",new JSONArray().put("fabric"));
             meta.put("/version/"+version,v.toString());
+            meta.put("/version_file/"+digest,v.toString());
             meta.put("/project/"+project+"/version",new JSONArray().put(v).toString());
         }
         List<File> install(String p,File root)throws Exception{
             return ModrinthFiles.install(this,p,"mod","1.20.1","fabric",root);
+        }
+    }
+    private static void roomInvites() throws Exception {
+        Catalog catalog=new Catalog();
+        catalog.entry("base","locked","required",new JSONArray());
+        catalog.entry("main","one","required",new JSONArray().put(catalog.dependency("required","base",null)));
+        catalog.entry("server","server-file","unsupported",new JSONArray());
+        Path tmp=Files.createTempDirectory("lumencraft-room");
+        try {
+            File host=tmp.resolve("host").toFile(), mods=new File(host,"mods");
+            Files.createDirectories(mods.toPath());
+            VanillaInstaller.writeJson(new File(host,"install.json"),new JSONObject().put("id","1.20.1").put("kind","client"));
+            VanillaInstaller.writeJson(new File(host,"loader.json"),new JSONObject().put("game","1.20.1").put("loader","fabric").put("version","0.15.11"));
+            Files.write(new File(mods,"host.jar").toPath(),catalog.data.get("one"));
+            Files.write(new File(mods,"utility.jar").toPath(),catalog.data.get("server-file"));
+            Files.write(new File(mods,"local.jar.disabled").toPath(),new byte[]{5});
+            String code="private-room-credential";
+            RoomInvite invite=RoomInvite.parse(RoomInvite.share(code,host,catalog));
+            check("share exact active client mod by file hash",invite.roomCode.equals(code) && invite.modCount()==1 && invite.hasEnvironment());
+            check("native room code needs no installation",!RoomInvite.parse(code).hasEnvironment());
+            rejects("reject empty invitation",()->RoomInvite.parse(" "));
+            File guest=tmp.resolve("guest").toFile();
+            PackImport.Components build=(root,stage,game,loader,pin,p)->{
+                if (!game.equals("1.20.1") || !loader.equals("fabric") || !pin.equals("0.15.11")) throw new AssertionError("component pins");
+                VanillaInstaller.writeJson(new File(stage,"install.json"),new JSONObject().put("id",game).put("kind","client"));
+                VanillaInstaller.writeJson(new File(stage,"loader.json"),new JSONObject().put("game",game).put("loader",loader).put("version",pin));
+            };
+            File target=invite.install(guest,null,catalog,build);
+            check("room dependencies downloaded and credential excluded",new File(target,"mods/base.jar").isFile() &&
+                !VanillaInstaller.readJson(new File(target,"pack.json")).toString().contains(code));
+            check("same environment reused",invite.install(guest,null,catalog,build).equals(target) && catalog.downloads==2);
+            Files.write(new File(target,"mods/extra.jar").toPath(),new byte[]{4});
+            rejects("reject modified existing room environment",()->invite.install(guest,null,catalog,build));
+            Files.write(new File(mods,"base.jar").toPath(),catalog.data.get("locked"));
+            String pinned=RoomInvite.share(code,host,catalog);
+            catalog.entry("base","newest","required",new JSONArray());
+            File locked=RoomInvite.parse(pinned).install(tmp.resolve("pinned").toFile(),null,catalog,build);
+            check("room respects host pin over a newer dependency",Arrays.equals(Files.readAllBytes(new File(locked,"mods/base.jar").toPath()),catalog.data.get("locked")));
+            String bad=pinned.replace(VerifiedDownloads.digest(new File(mods,"base.jar"),"SHA-512"),String.join("",Collections.nCopies(128,"0")));
+            rejects("reject host digest mismatch",()->RoomInvite.parse(bad).install(guest,null,catalog,build));
+            Files.write(new File(mods,"unknown.jar").toPath(),new byte[]{1});
+            rejects("unidentified host jar blocks environment sharing",()->RoomInvite.share(code,host,catalog));
+        } finally {
+            try(java.util.stream.Stream<Path> tree=Files.walk(tmp)){for(Path p:(Iterable<Path>)tree.sorted(Comparator.reverseOrder())::iterator) Files.delete(p);}
         }
     }
     private static void installer()throws Exception{
@@ -159,6 +205,18 @@ public final class NetworkTest {
             List<File> files=Modrinth.install("AANobbMI","mod","1.21.1","fabric",tmp.toFile());
             check("live Sodium client download + SHA-512",files.size()>0 && files.get(0).length()>0);
             System.out.println("Live artifact "+files.get(0).getName()+" "+files.get(0).length()+" bytes");
+            File source=tmp.toFile();
+            VanillaInstaller.writeJson(new File(source,"install.json"),new JSONObject().put("id","1.21.1").put("kind","client"));
+            VanillaInstaller.writeJson(new File(source,"loader.json"),new JSONObject().put("loader","fabric")
+                .put("version","0.16.9").put("game","1.21.1"));
+            RoomInvite modded=RoomInvite.parse(RoomInvite.share("test-code",source));
+            check("live host hashes resolve to Modrinth versions",modded.modCount()==files.size() && modded.game.equals("1.21.1"));
+            File classic=ClassicInstall.install(new File(source,"host"),(s,d,t)->{});
+            RoomInvite vanilla=RoomInvite.parse(RoomInvite.share("test-code",classic));
+            File guest=vanilla.install(new File(source,"guest"),null);
+            JSONObject receipt=VanillaInstaller.readJson(new File(guest,"install.json"));
+            check("live guest prepares pinned official game from invitation","rubydung".equals(receipt.getString("adapter")) &&
+                new File(new File(source,"guest"),receipt.getString("jar")).isFile());
         }finally{clean(tmp);}
     }
     private static void clean(Path tmp)throws IOException{

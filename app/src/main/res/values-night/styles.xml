@@ -1,1 +1,1 @@
-<resources><style name="LumenTheme" parent="android:style/Theme.Material.NoActionBar"><item name="android:fontFamily">sans</item><item name="android:colorAccent">#95DEAA</item><item name="android:windowBackground">#13211C</item></style></resources>
+<resources><style name="LumenTheme" parent="LumenDark"/></resources>

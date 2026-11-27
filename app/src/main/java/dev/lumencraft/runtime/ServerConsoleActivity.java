@@ -36,11 +36,12 @@ public final class ServerConsoleActivity extends Activity {
         activity.startActivity(new Intent(activity, ServerConsoleActivity.class)
                 .putExtra(ServerService.JAR, jar.getAbsolutePath()).putExtra(ServerService.JAVA, major));
     }
+    @Override protected void attachBaseContext(android.content.Context base) {
+        super.attachBaseContext(dev.lumencraft.ui.Appearance.attach(base));
+    }
     @Override public void onCreate(Bundle state) {
+        dev.lumencraft.ui.Appearance.apply(this);
         super.onCreate(state);
-        boolean dark = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
-                == Configuration.UI_MODE_NIGHT_YES;
-        setTheme(dark ? android.R.style.Theme_Material_NoActionBar : android.R.style.Theme_Material_Light_NoActionBar);
         major = getIntent().getIntExtra(ServerService.JAVA, 0);
         try {
             jar = ServerService.checkedJar(this, getIntent().getStringExtra(ServerService.JAR));
@@ -49,7 +50,9 @@ public final class ServerConsoleActivity extends Activity {
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
                 | android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
         LinearLayout page = new LinearLayout(this);
-        page.setOrientation(LinearLayout.HORIZONTAL);
+        Configuration config = getResources().getConfiguration();
+        boolean wide = config.screenWidthDp >= 600 || config.orientation == Configuration.ORIENTATION_LANDSCAPE;
+        page.setOrientation(wide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
         int margin = dp(10);
         page.setPadding(margin, margin, margin, margin);
         page.setFocusableInTouchMode(true);
@@ -65,7 +68,7 @@ public final class ServerConsoleActivity extends Activity {
         ScrollView sidebar = new ScrollView(this);
         sidebar.setFillViewport(true);
         int sideWidth = Math.min(dp(224), getResources().getDisplayMetrics().widthPixels / 3);
-        page.addView(sidebar,new LinearLayout.LayoutParams(sideWidth,-1));
+        page.addView(sidebar, wide ? new LinearLayout.LayoutParams(sideWidth,-1) : new LinearLayout.LayoutParams(-1,0,.42f));
         LinearLayout tools = new LinearLayout(this);
         tools.setPadding(dp(2),0,dp(10),0);
         tools.setOrientation(LinearLayout.VERTICAL);
@@ -104,7 +107,7 @@ public final class ServerConsoleActivity extends Activity {
         }
         LinearLayout console=new LinearLayout(this);
         console.setOrientation(LinearLayout.VERTICAL);
-        page.addView(console,new LinearLayout.LayoutParams(0,-1,1f));
+        page.addView(console, wide ? new LinearLayout.LayoutParams(0,-1,1f) : new LinearLayout.LayoutParams(-1,0,.58f));
         scroll = new ScrollView(this);
         scroll.setBackgroundColor(Color.rgb(25,31,29));
         output = new TextView(this);

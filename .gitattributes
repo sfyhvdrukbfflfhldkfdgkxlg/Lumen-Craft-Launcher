@@ -1,0 +1,9 @@
+# These files are distributed byte-for-byte and checked against the APK.
+app/src/main/assets/** -text
+rooms/src/main/assets/** -text
+*.so binary
+*.apk binary
+*.jar binary
+*.gz binary
+*.png binary
+gradlew text eol=lf

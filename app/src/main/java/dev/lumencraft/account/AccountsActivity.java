@@ -21,7 +21,11 @@ public final class AccountsActivity extends Activity {
     private AlertDialog pending;
     private int generation;
     private boolean leaving;
+    @Override protected void attachBaseContext(Context base) {
+        super.attachBaseContext(dev.lumencraft.ui.Appearance.attach(base));
+    }
     @Override public void onCreate(Bundle saved) {
+        dev.lumencraft.ui.Appearance.apply(this);
         super.onCreate(saved);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         vault=new AccountVault(this);

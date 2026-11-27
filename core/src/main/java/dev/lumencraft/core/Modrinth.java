@@ -167,9 +167,15 @@ public final class Modrinth {
         final JSONObject installed;
         final Map<String,Entry> entries = new LinkedHashMap<>();
         final Map<String,JSONObject> versions = new HashMap<>();
+        final Map<String,String> pins;
 
         Resolver(Source source, String game, String loader, JSONObject installed) {
+            this(source,game,loader,installed,Collections.<String,String>emptyMap());
+        }
+
+        Resolver(Source source, String game, String loader, JSONObject installed, Map<String,String> pins) {
             this.source = source; this.game = game; this.loader = loader; this.installed = installed;
+            this.pins = pins;
         }
 
         void add(String project, String pin, String expectedType) throws Exception {
@@ -180,6 +186,12 @@ public final class Modrinth {
                 project = owner;
             }
             project = id(project);
+            String locked = pins.get(project);
+            if (locked != null) {
+                if (pin != null && !locked.equals(pin)) throw conflict(project);
+                pin = locked;
+                version = version(locked);
+            }
             if (entries.containsKey(project)) {
                 if (pin != null && !pin.equals(entries.get(project).version)) throw conflict(project);
                 return;
@@ -202,6 +214,7 @@ public final class Modrinth {
             if (version == null) version = choose(project, type);
             if (!project.equals(version.getString("project_id")) || !supports(version, type))
                 throw new IOException("依赖不适用于目标游戏和加载器 "+project);
+            if (serverOnly(version)) throw new IOException("仅服务端版本 "+project);
             JSONObject primary = primary(version);
             JSONArray deps = version.optJSONArray("dependencies");
             if (deps == null) deps = new JSONArray();
@@ -274,5 +287,10 @@ public final class Modrinth {
                 }
             }
         }
+    }
+
+    static boolean serverOnly(JSONObject version) {
+        String environment=version.optString("environment");
+        return "server_only".equals(environment) || "dedicated_server_only".equals(environment);
     }
 }

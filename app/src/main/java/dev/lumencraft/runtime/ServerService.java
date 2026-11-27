@@ -32,6 +32,21 @@ public final class ServerService extends Service {
     private volatile boolean destroyed;
 
     static boolean busy() { return activePath != null; }
+    /** Port of the supervised JVM for local room discovery. Read on the room worker. */
+    public static int activePort() throws IOException {
+        String path = activePath;
+        if (path == null || child == null) return 0;
+        File config = new File(new File(path).getParentFile(), "server.properties");
+        Properties properties = new Properties();
+        if (config.isFile()) {
+            try (InputStream in = new FileInputStream(config)) { properties.load(in); }
+        }
+        try {
+            int port = Integer.parseInt(properties.getProperty("server-port", "25565").trim());
+            if (port >= 1 && port <= 65535) return port;
+        } catch (NumberFormatException ignored) {}
+        throw new IOException("当前服务端的 server-port 无效");
+    }
     static boolean controls(String path) { return path.equals(activePath) && child != null; }
     static int revision() { return revision; }
     static synchronized String output(String path) { return path.equals(lastPath) ? tail.toString() : ""; }

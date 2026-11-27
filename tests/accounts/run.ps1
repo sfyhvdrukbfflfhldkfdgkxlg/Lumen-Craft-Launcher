@@ -9,7 +9,7 @@ $manifest='<manifest xmlns:android="http://schemas.android.com/apk/res/android" 
 [IO.File]::WriteAllText("$work\AndroidManifest.xml",$manifest)
 $android="$Sdk\platforms\android-35\android.jar"
 $bt="$Sdk\build-tools\35.0.0"
-$src=Get-ChildItem "$root\app\src\main\java\dev\lumencraft\account" -Filter '*.java'|Select-Object -Expand FullName
+$src=Get-ChildItem "$root\app\src\main\java\dev\lumencraft\account" -Filter '*.java' -Exclude 'AccountsActivity.java' | Select-Object -Expand FullName
 function Checked([scriptblock]$action) { & $action; if ($LASTEXITCODE) { throw "Command failed with exit $LASTEXITCODE" } }
 Checked { & "$Jdk\bin\javac.exe" --release 8 -encoding UTF-8 -cp $android -d $classes @src "$PSScriptRoot\AccountTest.java" }
 Checked { & "$Jdk\bin\jar.exe" cf "$work\test.jar" -C $classes . }

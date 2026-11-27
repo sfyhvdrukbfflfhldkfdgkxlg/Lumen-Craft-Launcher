@@ -25,8 +25,12 @@ extern "C" JNIEXPORT jstring JNICALL Java_dev_lumencraft_LegacyGraphics_check(JN
                 glViewport(0,0,8,8);glClearColor(0,0,0,1);glClear(GL_COLOR_BUFFER_BIT);
                 begin(7);color(1,0,0,1);vertex(-1,-1,0);vertex(1,-1,0);vertex(1,1,0);vertex(-1,1,0);end();
                 unsigned char p[4]={};glReadPixels(4,4,1,1,GL_RGBA,GL_UNSIGNED_BYTE,p);
-                msg=glGetError()==GL_NO_ERROR && p[0]==255 && p[1]==0 && p[2]==0
-                    ? "GL_QUADS → GLES 2.0   PASS (RGBA readback)" : "GL_QUADS → GLES 2.0   FAIL";
+                bool quad=glGetError()==GL_NO_ERROR && p[0]==255 && p[1]==0 && p[2]==0;
+                begin(9);color(0,1,0,1);vertex(-1,-1,0);vertex(1,-1,0);vertex(1,1,0);vertex(-1,1,0);end();
+                glReadPixels(4,4,1,1,GL_RGBA,GL_UNSIGNED_BYTE,p);
+                bool polygon=glGetError()==GL_NO_ERROR && p[0]==0 && p[1]==255 && p[2]==0;
+                msg=!quad ? "GL_QUADS -> GLES 2.0   FAIL" : !polygon ? "GL_POLYGON -> GLES 2.0   FAIL" :
+                    "GL_QUADS → GLES 2.0   PASS (RGBA readback)\nGL_POLYGON → GLES 2.0   PASS (RGBA readback)";
                 lumenGLDestroy(bridge);
             }
             eglMakeCurrent(d,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT);

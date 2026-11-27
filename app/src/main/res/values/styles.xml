@@ -1,1 +1,28 @@
-<resources><style name="LumenTheme" parent="android:style/Theme.Material.Light.NoActionBar"><item name="android:fontFamily">sans</item><item name="android:colorAccent">#126447</item><item name="android:windowLightStatusBar">true</item><item name="android:windowBackground">#F4F6EF</item></style></resources>
+<resources>
+    <style name="LumenLight" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:colorAccent">#245E46</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">#FAF9F5</item>
+        <item name="android:alertDialogTheme">@style/LumenDialogLight</item>
+    </style>
+    <style name="LumenDark" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:colorAccent">#A8CDA9</item>
+        <item name="android:windowBackground">#18201D</item>
+        <item name="android:alertDialogTheme">@style/LumenDialogDark</item>
+    </style>
+    <style name="LumenDialogLight" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:colorAccent">#245E46</item>
+    </style>
+    <style name="LumenDialogDark" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">#A8CDA9</item>
+    </style>
+    <style name="LumenDialogDarkStill" parent="LumenDialogDark">
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+    <style name="LumenDialogLightStill" parent="LumenDialogLight">
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+    <style name="LumenTheme" parent="LumenLight"/>
+</resources>

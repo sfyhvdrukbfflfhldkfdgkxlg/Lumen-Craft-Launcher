@@ -5,7 +5,7 @@ import android.content.Context;
 import android.os.ParcelFileDescriptor;
 import java.io.*;
 
-/** JNI contract defined by Terracotta v0.4.2's src/lib.rs. Native code runs only in the companion process. */
+/** JNI contract from Terracotta v0.4.2. Loaded on demand by the launcher's VPN service. */
 final class NativeRooms {
     static volatile RoomService service;
     static volatile boolean started;

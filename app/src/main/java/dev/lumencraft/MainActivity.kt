@@ -1,5 +1,12 @@
 package dev.lumencraft
 
+import dev.lumencraft.ui.Appearance
+import dev.lumencraft.ui.NavSymbol
+import dev.lumencraft.ui.PageDeck
+import dev.lumencraft.ui.JobProgress
+import android.content.res.ColorStateList
+import android.graphics.drawable.RippleDrawable
+import android.view.inputmethod.InputMethodManager
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
@@ -43,130 +50,298 @@ class MainActivity : Activity() {
     private var status: ServerProbe.Status? = null
     private var address = ""
     private var fileResult: ((Uri) -> Unit)? = null
-    private val dark get() = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+    private val dark get() = Appearance.isDark(this)
     private fun color(light: String, night: String) = Color.parseColor(if (dark) night else light)
-    private val bg get() = color("#F4F6EF", "#121B17")
-    private val paper get() = color("#FFFFFF", "#21302A")
-    private val ink get() = color("#1C3228", "#E4EEE8")
-    private val muted get() = color("#506458", "#B2C4B8")
-    private val accent get() = color("#195D43", "#A3DDB5")
-    private val soft get() = color("#DEEDDD", "#324B3B")
+    private val bg get() = color("#FAF9F5", "#18201D")
+    private val ink get() = color("#182B24", "#EAEFE9")
+    private val muted get() = color("#54655A", "#B4C2B8")
+    private val accent get() = color("#245E46", "#A8CDA9")
+    private val rule get() = color("#CED5CC", "#39483F")
+    private val railColor get() = color("#1E3E32", "#10271E")
+    private val history = ArrayDeque<Int>()
+    private var positions = IntArray(5)
+    private lateinit var deck: PageDeck
+    private lateinit var scroll: ScrollView
+    private lateinit var nav: LinearLayout
+    private var sidebar = false
+    private var redrawChrome = true
+    private var animateUi = true
+    private var unregisterBack: (() -> Unit)? = null
+    private var jobDialog: AlertDialog? = null
 
+    override fun attachBaseContext(base: Context) = super.attachBaseContext(Appearance.attach(base))
     override fun onCreate(state: Bundle?) {
+        Appearance.apply(this)
         super.onCreate(state)
         page = state?.getInt("page")?.coerceIn(0, 4) ?: 0
-        address = state?.getString("address") ?: ""
+        address = state?.getString("address").orEmpty()
+        searchQuery = state?.getString("query").orEmpty()
+        category = state?.getInt("category")?.coerceIn(0, 4) ?: 0
+        advanced = state?.getBoolean("advanced") ?: false
+        state?.getIntArray("positions")?.takeIf { it.size == pages.size }?.let { positions = it }
+        state?.getIntArray("history")?.filter { it in pages.indices }?.let { history.addAll(it) }
         render()
     }
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
+        if (::scroll.isInitialized) positions[page] = scroll.scrollY
         outState.putInt("page", page)
         outState.putString("address", address)
+        outState.putString("query", searchQuery)
+        outState.putInt("category", category)
+        outState.putBoolean("advanced", advanced)
+        outState.putIntArray("positions", positions)
+        outState.putIntArray("history", history.toIntArray())
     }
-    override fun onConfigurationChanged(newConfig: Configuration) { super.onConfigurationChanged(newConfig); render() }
-    override fun onRestart() { super.onRestart(); if(activeJob==null) render() }
-    override fun onDestroy() { activeJob?.interrupt(); super.onDestroy() }
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        Appearance.apply(this)
+        redrawChrome = true
+        render()
+    }
+    override fun onRestart() { super.onRestart(); if (activeJob == null) render() }
+    override fun onDestroy() {
+        unregisterBack?.invoke()
+        unregisterBack = null
+        activeJob?.interrupt()
+        jobDialog?.dismiss()
+        jobDialog = null
+        super.onDestroy()
+    }
+    @Deprecated("Framework callback")
+    override fun onBackPressed() {
+        if (history.isEmpty()) super.onBackPressed() else back()
+    }
+    private fun back() {
+        if (history.isEmpty()) return
+        page = history.removeLast()
+        render()
+    }
+    private fun selectPage(index: Int) {
+        if (page == index) {
+            if (Appearance.motion(this)) scroll.smoothScrollTo(0,0) else scroll.scrollTo(0,0)
+            return
+        }
+        val ime = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+        currentFocus?.let { ime.hideSoftInputFromWindow(it.windowToken, 0) }
+        history.remove(page)
+        history.remove(index)
+        history.addLast(page)
+        page = index
+        render(true)
+    }
     private fun dp(v: Int) = (resources.displayMetrics.density * v + .5f).toInt()
-    private fun shape(c: Int, radius: Int = 14) = GradientDrawable().apply { setColor(c); cornerRadius = dp(radius).toFloat() }
+    private fun fill(c: Int, radius: Int = 0) = GradientDrawable().apply {
+        setColor(c)
+        cornerRadius = dp(radius).toFloat()
+    }
+    private fun touch(c: Int, ripple: Int, radius: Int = 0): android.graphics.drawable.Drawable =
+        if (animateUi) RippleDrawable(ColorStateList.valueOf(ripple), fill(c,radius), null)
+        else android.graphics.drawable.StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_pressed), fill(ripple, radius))
+            addState(intArrayOf(), fill(c,radius))
+        }
     private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     private fun label(s: String, size: Int, c: Int = ink, bold: Boolean = false) = TextView(this).apply {
-        text = s; textSize = size.toFloat(); setTextColor(c); includeFontPadding = false
+        text = s; textSize = size.toFloat(); setTextColor(c); includeFontPadding = true
         if (bold) typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     }
     private fun LinearLayout.place(v: View, gap: Int = 0, height: Int = -2) {
         addView(v, LinearLayout.LayoutParams(-1, if (height < 0) height else dp(height)).apply { topMargin = dp(gap) })
     }
-    private fun render() {
-        window.statusBarColor = bg; window.navigationBarColor = paper
-        window.decorView.systemUiVisibility = if (dark) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or
-            (if (Build.VERSION.SDK_INT >= 26) View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR else 0)
-        val screen = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; setBackgroundColor(bg) }
+    private fun buildChrome() {
+        sidebar = resources.configuration.screenWidthDp >= 600 ||
+            (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE && resources.configuration.screenWidthDp >= 440)
+        window.statusBarColor = if (sidebar) bg else railColor
+        window.navigationBarColor = if (Build.VERSION.SDK_INT >= 26 || dark) bg else railColor
+        window.decorView.systemUiVisibility = (if (!dark && sidebar) View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR else 0) or
+            (if (!dark && Build.VERSION.SDK_INT >= 26) View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR else 0)
+        val screen = LinearLayout(this).apply {
+            orientation = if (sidebar) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+            setBackgroundColor(bg)
+            isFocusableInTouchMode = true
+        }
         if (Build.VERSION.SDK_INT >= 35) screen.setOnApplyWindowInsetsListener { view, insets ->
-            val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.displayCutout())
+            val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.displayCutout() or android.view.WindowInsets.Type.ime())
             view.setPadding(bars.left, bars.top, bars.right, bars.bottom); insets
         }
-        val wide=resources.configuration.screenWidthDp>=640
-        val rail=ScrollView(this).apply {setBackgroundColor(paper);isVerticalScrollBarEnabled=false}
-        val nav=column().apply {setPadding(dp(10),dp(16),dp(10),dp(14))}
-        val brand=LinearLayout(this).apply {gravity=Gravity.CENTER_VERTICAL;setPadding(dp(4),0,0,0)}
-        brand.addView(ImageView(this).apply { setImageResource(R.drawable.mark) },dp(28),dp(28))
-        brand.addView(label("微光",21,ink,true),LinearLayout.LayoutParams(-2,-2).apply {leftMargin=dp(7)})
-        nav.place(brand)
-        nav.place(label("LumenCraft",13,muted).apply {setPadding(dp(4),0,0,0)},5)
-        pages.forEachIndexed { i, name ->
-            val tab = label(name, 16, if (page == i) accent else muted, page == i)
-            tab.gravity = Gravity.CENTER_VERTICAL
-            tab.setPadding(dp(16),0,dp(4),0)
-            if (i == page) tab.background = shape(soft)
-            tab.isSelected = i == page
-            tab.isFocusable=true
-            tab.setOnClickListener { page = i; render() }
-            nav.place(tab,if(i==0) 18 else 3,46)
+        nav = LinearLayout(this).apply {
+            orientation = if (sidebar) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+            setBackgroundColor(if(sidebar) railColor else bg)
         }
-        rail.addView(nav)
-        screen.addView(rail,LinearLayout.LayoutParams(dp(if(wide) 128 else 106),-1))
-        val scroll = ScrollView(this).apply { isFillViewport = true }
-        body = column().apply { setPadding(dp(if(wide) 24 else 14),dp(16),dp(if(wide) 24 else 14),dp(20)) }
-        scroll.addView(body);screen.addView(scroll,LinearLayout.LayoutParams(0,-1,1f))
-        body.place(label(headings[page],28,ink,true))
-        when (page) { 0 -> instances(false); 1 -> resourcesPage(); 2 -> online(); 3 -> instances(true); 4 -> settings() }
+        deck = PageDeck(this, { history.isNotEmpty() }, { back() })
+        if (sidebar) {
+            val rail = ScrollView(this).apply {
+                setBackgroundColor(railColor)
+                isVerticalScrollBarEnabled = false
+                addView(nav)
+            }
+            screen.addView(rail, LinearLayout.LayoutParams(dp(if(resources.configuration.screenWidthDp >= 840) 152 else 118), -1))
+            screen.addView(deck, LinearLayout.LayoutParams(0,-1,1f))
+        } else {
+            val masthead = LinearLayout(this).apply {
+                setBackgroundColor(railColor); gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(20),dp(8),dp(20),dp(8))
+            }
+            masthead.addView(ImageView(this).apply { setImageResource(R.drawable.mark) },dp(24),dp(24))
+            masthead.addView(label("微光   LumenCraft",16,Color.WHITE,true), LinearLayout.LayoutParams(-2,-2).apply {leftMargin=dp(8)})
+            screen.addView(masthead)
+            screen.addView(deck,LinearLayout.LayoutParams(-1,0,1f))
+            screen.addView(View(this).apply{setBackgroundColor(rule)}, -1, 1)
+            screen.addView(nav)
+        }
         setContentView(screen)
+        redrawChrome = false
+    }
+    private fun drawNav() {
+        nav.removeAllViews()
+        val white = Color.WHITE
+        if (sidebar) {
+            val brand = column().apply { setPadding(dp(16),dp(18),dp(8),dp(12)) }
+            val title = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+            title.addView(ImageView(this).apply { setImageResource(R.drawable.mark) },dp(25),dp(25))
+            title.addView(label("微光",20,white,true),LinearLayout.LayoutParams(-2,-2).apply{leftMargin=dp(6)})
+            brand.place(title)
+            brand.place(label("LumenCraft",13,Color.rgb(195,217,202)),2)
+            nav.place(brand)
+        }
+        pages.forEachIndexed { i,name ->
+            val selected = i == page
+            val foreground = if(sidebar) (if(selected) white else Color.rgb(195,217,202)) else (if(selected) accent else muted)
+            val surface = if(sidebar) (if(selected) Color.rgb(52,89,70) else railColor) else bg
+            val container = FrameLayout(this).apply {
+                isSelected = selected; isFocusable = true; contentDescription = name
+                background = touch(surface, if(sidebar) Color.rgb(67,104,84) else rule)
+                setOnClickListener { selectPage(i) }
+            }
+            val inner = LinearLayout(this).apply {
+                gravity = if(sidebar) Gravity.CENTER_VERTICAL else Gravity.CENTER
+                orientation = if(sidebar) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                if(sidebar) setPadding(dp(16),dp(5),dp(4),dp(5)) else setPadding(0,dp(6),0,dp(4))
+            }
+            inner.addView(NavSymbol(this,i,foreground), dp(19),dp(19))
+            inner.addView(label(name, if(sidebar) 15 else 12, foreground,selected),LinearLayout.LayoutParams(-2,-2).apply{
+                if(sidebar) leftMargin = dp(9) else topMargin = dp(1)
+            })
+            container.addView(inner, FrameLayout.LayoutParams(-1,-2,Gravity.CENTER_VERTICAL))
+            if(selected) container.addView(View(this).apply {setBackgroundColor(if(sidebar) Color.rgb(187,220,164) else accent)},
+                if(sidebar) FrameLayout.LayoutParams(dp(3),dp(22),Gravity.LEFT or Gravity.CENTER_VERTICAL)
+                else FrameLayout.LayoutParams(dp(24),dp(2),Gravity.TOP or Gravity.CENTER_HORIZONTAL))
+            container.minimumHeight = dp(if(sidebar) 48 else 56)
+            if(sidebar) nav.place(container) else nav.addView(container, LinearLayout.LayoutParams(0,-2,1f))
+        }
+    }
+    private fun render(animate: Boolean = false) {
+        animateUi = Appearance.motion(this)
+        if (::deck.isInitialized && ::scroll.isInitialized && deck.pageIndex >= 0) positions[deck.pageIndex] = scroll.scrollY
+        if (redrawChrome || !::deck.isInitialized) buildChrome()
+        drawNav()
+        scroll = ScrollView(this).apply { isFillViewport = true; setBackgroundColor(bg) }
+        val wide = resources.configuration.screenWidthDp >= 700
+        body = column().apply {
+            val side = dp(if(wide) 28 else 20)
+            setPadding(side,dp(if(wide) 18 else 16),side,dp(26))
+            isFocusableInTouchMode = true
+        }
+        scroll.addView(body)
+        body.place(label(headings[page], if(wide) 30 else 27, ink,true))
+        body.place(View(this).apply {setBackgroundColor(ink)},8,1)
+        when (page) { 0 -> instances(false); 1 -> resourcesPage(); 2 -> online(); 3 -> instances(true); 4 -> settings() }
+        deck.display(scroll,page,history.lastOrNull(),animate)
+        if (Build.VERSION.SDK_INT >= 33) {
+            if (history.isEmpty()) { unregisterBack?.invoke(); unregisterBack = null }
+            else if (unregisterBack == null) unregisterBack = dev.lumencraft.ui.SystemBack.register(this,{deck},{back()})
+        }
+        val target = positions[page]
+        val shown = scroll
+        shown.post { if (scroll === shown) shown.scrollTo(0,target) }
     }
     private fun card(title: String, notes: String = "", action: (() -> Unit)? = null): LinearLayout {
-        val panel = column().apply { background = shape(paper); setPadding(dp(16),dp(16),dp(16),dp(16)) }
-        panel.place(label(title, 18, ink, true))
-        if (notes.isNotBlank()) panel.place(label(notes, 14, muted), 8)
-        if (action != null) panel.setOnClickListener { action() }
-        body.place(panel, 12); return panel
+        val panel = column().apply { setPadding(0,dp(11),0,dp(11)) }
+        panel.place(label(title,17,ink,true))
+        if(notes.isNotBlank()) panel.place(label(notes,14,muted),3)
+        if(action != null) {
+            panel.background = touch(bg,rule)
+            panel.isFocusable = true
+            panel.setOnClickListener {action()}
+        }
+        body.place(panel,3)
+        body.addView(View(this).apply {setBackgroundColor(rule)},-1,1)
+        return panel
     }
     private fun button(s: String, primary: Boolean = false, action: () -> Unit) = Button(this).apply {
-        text = s; textSize = 15f; isAllCaps = false; minHeight = dp(48)
-        setTextColor(if (primary) color("#FFFFFF", "#10251A") else accent)
-        background = shape(if (primary) accent else soft, 12)
+        text = s; textSize = 15f; isAllCaps = false; minHeight = dp(46)
+        typeface = Typeface.create("sans-serif-medium",Typeface.NORMAL)
+        setTextColor(if(primary) color("#FFFFFF","#13241A") else accent)
+        background = touch(if(primary) accent else color("#E9EDE5","#26372E"),
+            color("#B9CEC0","#5A705E"), 3)
+        setPadding(dp(14),dp(7),dp(14),dp(7))
         stateListAnimator = null
-        setOnClickListener { action() }
+        setOnClickListener {action()}
     }
-    private fun entry(hintText: String, value: String = "") = EditText(this).apply {
+    private fun entry(hintText: String, value: String = "", changed: ((String)->Unit)? = null) = EditText(this).apply {
         hint = hintText; setSingleLine(true); setText(value); textSize = 16f
         setTextColor(ink); setHintTextColor(muted)
+        if (changed != null) addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = changed(s.toString())
+            override fun afterTextChanged(s: android.text.Editable?) {}
+        })
     }
     private fun section(s: String) = body.place(label(s, 15, muted, true), 22)
+    private fun dialogBuilder() = if (Appearance.motion(this)) AlertDialog.Builder(this)
+        else AlertDialog.Builder(this, if (dark) R.style.LumenDialogDarkStill else R.style.LumenDialogLightStill)
     private fun note(title: String, message: String) {
-        AlertDialog.Builder(this).setTitle(title).setMessage(message).setPositiveButton("关闭", null).show()
+        dialogBuilder().setTitle(title).setMessage(message).setPositiveButton("关闭", null).show()
     }
     private fun options(title: String, items: List<String>, pick: (Int) -> Unit) {
-        AlertDialog.Builder(this).setTitle(title).setItems(items.toTypedArray()) { _, n -> pick(n) }.show()
+        dialogBuilder().setTitle(title).setItems(items.toTypedArray()) { _, n -> pick(n) }.show()
     }
     private fun ask(title: String, hint: String, initial: String = "", onSubmit: (String) -> Unit) {
         val field = entry(hint, initial)
         val box = column().apply { setPadding(dp(20), dp(8), dp(20), 0); addView(field) }
-        AlertDialog.Builder(this).setTitle(title).setView(box).setNegativeButton("取消",null)
+        dialogBuilder().setTitle(title).setView(box).setNegativeButton("取消",null)
             .setPositiveButton("确定") { _,_ -> val value = field.text.toString().trim(); if (value.isNotEmpty()) onSubmit(value) }.show()
     }
-    private fun <T> job(title: String, work: ((String) -> Unit) -> T, success: (T) -> Unit) {
+    private fun <T> job(title: String, work: (JobProgress) -> T, success: (T) -> Unit) {
         if (activeJob != null) return
+        val motion = Appearance.motion(this)
         val box = column().apply { setPadding(dp(24),dp(18),dp(24),dp(4)) }
         val info = label("正在处理…", 15, muted)
-        box.place(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { isIndeterminate = true }); box.place(info, 8)
-        val dialog = AlertDialog.Builder(this).setTitle(title).setView(box).setCancelable(false).setNegativeButton("取消",null).create()
+        val bar = ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply {
+            max = 1000
+            isIndeterminate = motion
+            if(!motion) visibility = View.INVISIBLE
+        }
+        box.place(bar); box.place(info, 8)
+        val reporter = JobProgress(bar,info,motion)
+        val dialog = dialogBuilder().setTitle(title).setView(box).setCancelable(false).setNegativeButton("取消",null).create()
+        jobDialog = dialog
+        dialog.setOnDismissListener { reporter.close() }
         dialog.show()
+        val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
         val task = Thread({
-            val result = runCatching { work { line -> runOnUiThread { if (dialog.isShowing) info.text = line } } }
-            val cancelled = Thread.currentThread().isInterrupted
+            val result = runCatching { work(reporter) }
             runOnUiThread {
                 activeJob = null
+                jobDialog = null
+                reporter.close()
                 if (!isDestroyed && !isFinishing) {
                     dialog.dismiss()
-                    if (cancelled) Toast.makeText(this,"任务已中止",Toast.LENGTH_SHORT).show()
+                    if (cancelled.get()) Toast.makeText(this,"任务已中止",Toast.LENGTH_SHORT).show()
                     else result.fold(success) { e -> note(title, e.localizedMessage ?: e.javaClass.simpleName) }
                 }
             }
         }, "library-worker")
         activeJob = task
-        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { task.interrupt(); info.text = "正在结束任务…"; it.isEnabled = false }
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+            cancelled.set(true); task.interrupt(); reporter.close()
+            info.text = "正在结束任务…"; it.isEnabled = false
+        }
         task.start()
     }
-    private fun progress(update: (String) -> Unit) = VanillaInstaller.Progress { label, done, total -> update("$label   $done / $total") }
+    private fun progress(update: JobProgress) = update.files
     private data class Instance(val dir: File, val meta: JSONObject, val name: String) {
         val id get() = meta.getString("id")
         val java get() = meta.getInt("javaMajor")
@@ -248,7 +423,7 @@ class MainActivity : Activity() {
                 }
             })
             actions.add("移除实例" to {
-                AlertDialog.Builder(this).setMessage("将 ${i.name} 移出列表？可以在游戏页恢复。")
+                dialogBuilder().setMessage("将 ${i.name} 移出列表？可以在游戏页恢复。")
                     .setNegativeButton("取消",null).setPositiveButton("移除") { _,_ ->
                         job("移除实例",{InstanceFiles.move(root,i.dir,false)}) {render()}
                     }.show()
@@ -301,7 +476,7 @@ class MainActivity : Activity() {
     private val types = listOf("mod","resourcepack","shader","modpack","datapack")
     private val typeNames = listOf("模组","资源包","光影","整合包","数据包")
     private fun resourcesPage() {
-        val search = entry("输入项目名称或关键词",searchQuery)
+        val search = entry("输入项目名称或关键词",searchQuery) { searchQuery = it }
         body.place(search,16)
         body.place(button("类别  ·  " + typeNames[category]) { options("选择资源类别",typeNames) { category=it; results=emptyList();resourceSearched=false;searchQuery=search.text.toString();render() } },10)
         body.place(button("搜索 Modrinth",true) {
@@ -335,12 +510,11 @@ class MainActivity : Activity() {
         }
     }
     private fun online() {
-        val field=entry("域名、IP 或 [IPv6]:端口",address)
+        val field=entry("域名、IP 或 [IPv6]:端口",address) { address = it }
         body.place(field,18)
         body.place(button("检测服务器",true) { probe(field.text.toString().trim()) },12)
         body.place(button("陶瓦联机房间") {
-            try { startActivity(Intent().setClassName("dev.lumencraft.rooms","dev.lumencraft.rooms.TerracottaActivity")) }
-            catch (_:android.content.ActivityNotFoundException) { note("安装联机组件","请安装随项目提供的 LumenCraft-Rooms-Alpha1.0.0.apk，然后再次打开陶瓦联机房间。") }
+            startActivity(Intent(this, dev.lumencraft.rooms.TerracottaActivity::class.java))
         },8)
         body.place(button("发现局域网世界") {
             job("监听局域网广播",{ update ->
@@ -360,7 +534,7 @@ class MainActivity : Activity() {
             val box=card(s.address,"${s.motd}\n\n${s.versionName}   ·   协议 ${s.protocol}\n${s.online} / ${s.max} 人   ·   ${s.latencyMs} ms" + (s.loaderHint?.takeIf { it.isNotBlank() }?.let { "\n加载器提示 $it" } ?: ""))
             box.place(button("查找服务器整合包") {
                 job("读取服务器发布的清单",{ ServerPack.discover(s.address,s.versionName,installer.versions()) }) { pack ->
-                    AlertDialog.Builder(this).setTitle(pack.name)
+                    dialogBuilder().setTitle(pack.name)
                         .setMessage("Minecraft "+pack.game+"\n来源 "+Uri.parse(pack.url).host+"\n%.1f MiB".format(Locale.ROOT,pack.size/1048576.0)+"\n\n将下载此服务器指定的模组和配置，为该版本创建独立实例。")
                         .setNegativeButton("取消",null).setPositiveButton("安装") { _,_ ->
                             job("同步服务器整合包",{ update ->pack.install(root,progress(update)) }) { dir ->
@@ -372,7 +546,7 @@ class MainActivity : Activity() {
             },12)
             box.place(button("按报告版本准备游戏文件") {
                 job("核对官方版本",{ s.exactVersion(installer.versions().map { it.id }) ?: error("服务器没有报告唯一的官方版本。请从游戏页手动选择。") }) { id ->
-                    AlertDialog.Builder(this).setTitle("准备 $id 的基础文件？")
+                    dialogBuilder().setTitle("准备 $id 的基础文件？")
                         .setMessage("将为 ${s.address} 建立独立实例。状态协议没有提供完整客户端模组清单。")
                         .setNegativeButton("取消",null).setPositiveButton("准备文件") { _,_ ->
                             val name = "server-" + UUID.nameUUIDFromBytes((s.address + "/" + id).toByteArray())
@@ -406,9 +580,51 @@ class MainActivity : Activity() {
         card("账户管理","离线档案与 Microsoft 账户") {
             startActivity(Intent(this,dev.lumencraft.account.AccountsActivity::class.java))
         }
-        card("设备","Android ${Build.VERSION.RELEASE}  ·  API ${Build.VERSION.SDK_INT}\n${Build.MANUFACTURER} ${Build.MODEL}\n${Build.SUPPORTED_ABIS.joinToString(" / ")}")
-        card(if(advanced) "收起运行设置" else "展开运行设置",action={advanced=!advanced;render()})
-        if(advanced){
+        val modes = listOf("跟随系统","浅色","深色")
+        card("界面主题",modes[Appearance.mode(this).coerceIn(0,2)]) {
+            options("界面主题",modes) { n ->
+                if (n != Appearance.mode(this)) {
+                    prefs.edit().putInt("appearance",n).apply()
+                    recreate()
+                }
+            }
+        }
+        val motion = prefs.getBoolean("motion",true)
+        card("界面动画",if(motion) "自动 · 遵循系统动画、省电及低内存设置" else "关闭") {
+            options("界面动画",listOf("自动","关闭")) { n ->
+                prefs.edit().putBoolean("motion",n==0).apply()
+                render()
+            }
+        }
+        val group = column()
+        lateinit var toggle: LinearLayout
+        toggle = card(if(advanced) "收起运行设置" else "展开运行设置",action={
+            android.transition.TransitionManager.endTransitions(body)
+            if (Appearance.motion(this)) {
+                val change = android.transition.AutoTransition().apply {
+                    duration = 140
+                    interpolator = android.view.animation.DecelerateInterpolator()
+                }
+                android.transition.TransitionManager.beginDelayedTransition(body,change)
+            }
+            advanced = !advanced
+            (toggle.getChildAt(0) as TextView).text = if(advanced) "收起运行设置" else "展开运行设置"
+            populateAdvanced(group)
+        })
+        body.place(group)
+        populateAdvanced(group)
+        card("版本与兼容范围","LumenCraft " + packageManager.getPackageInfo(packageName,0).versionName) {
+            note("此版本的范围","远古客户端适配 "+ClassicInstall.versions().joinToString("、")+"。其他游戏版本目前支持文件准备。服务端使用独立 OpenJDK 进程。\n\nFabric、Quilt 和 Modrinth 已接入。陶瓦房间可从联机页打开。现代 LWJGL 客户端和完整桌面 OpenGL 仍待实现。")
+        }
+    }
+    private fun populateAdvanced(group: LinearLayout) {
+        group.removeAllViews()
+        if(!advanced) return
+        val originalBody = body
+        body = group
+        try {
+            card("设备","Android " + Build.VERSION.RELEASE + "  ·  API " + Build.VERSION.SDK_INT + "\n" +
+                    Build.MANUFACTURER + " " + Build.MODEL + "\n" + Build.SUPPORTED_ABIS.joinToString(" / "))
             val am=getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
             val mem=android.app.ActivityManager.MemoryInfo().also {am.getMemoryInfo(it)}
             val power=getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
@@ -418,18 +634,15 @@ class MainActivity : Activity() {
             card("远古版省电模式",if(limited) "已开启，下一次启动上限 15 FPS" else "自动，系统省电或低内存设备上限 15 FPS，其他设备上限 30 FPS"){
                 options("远古版帧率",listOf("自动","始终省电 · 15 FPS")){n->prefs.edit().putBoolean("low-power",n==1).apply();render()}
             }
-        }
-        card("图形能力检测","创建 EGL 上下文并查询设备驱动。") {
-            job("读取图形驱动",{ GraphicsProbe.inspect()+"\n"+LegacyGraphics.check() }) { note("设备报告",it) }
-        }
-        card("存储","应用私有目录  ·  可用 %.1f GiB".format(Locale.ROOT,filesDir.usableSpace / 1073741824.0)) {
-            job("统计本地文件",{ root.walkTopDown().filter { it.isFile }.fold(0L) { sum,f -> sum + f.length() } }) { n ->
-                note("本地文件","%.1f MiB\n%s".format(Locale.ROOT,n/1048576.0,root.absolutePath))
+            card("图形能力检测","创建 EGL 上下文并查询设备驱动。") {
+                job("读取图形驱动",{ GraphicsProbe.inspect()+"\n"+LegacyGraphics.check() }) { note("设备报告",it) }
             }
-        }
-        card("版本与兼容范围","LumenCraft ${packageManager.getPackageInfo(packageName,0).versionName}") {
-            note("此版本的范围","远古客户端适配 "+ClassicInstall.versions().joinToString("、")+"。其他游戏版本目前支持文件准备。服务端使用独立 OpenJDK 进程。\n\nFabric、Quilt 和 Modrinth 已接入。陶瓦房间使用单独安装的联机组件。现代 LWJGL 客户端和完整桌面 OpenGL 仍待实现。")
-        }
+            card("存储","应用私有目录  ·  可用 %.1f GiB".format(Locale.ROOT,filesDir.usableSpace / 1073741824.0)) {
+                job("统计本地文件",{ root.walkTopDown().filter { it.isFile }.fold(0L) { sum,f -> sum + f.length() } }) { n ->
+                    note("本地文件","%.1f MiB\n%s".format(Locale.ROOT,n/1048576.0,root.absolutePath))
+                }
+            }
+        } finally { body = originalBody }
     }
     private fun mods(i:Instance) {
         val dir = File(i.dir,"mods")

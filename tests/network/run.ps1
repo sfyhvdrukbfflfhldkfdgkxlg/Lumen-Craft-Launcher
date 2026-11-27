@@ -11,7 +11,7 @@ if (!(Test-Path $json) -or (Get-FileHash $json).Hash -ne $expected) {
 }
 if ((Get-FileHash $json).Hash -ne $expected) { throw 'Test JSON library checksum mismatch' }
 $source = Join-Path $root 'core\src\main\java\dev\lumencraft\core'
-$files = @('Modrinth','ModrinthFiles','ServerProbe','ServerPack','SrvLookup','PackImport','FabricInstaller','VanillaInstaller','VerifiedDownloads') | ForEach-Object { Join-Path $source ($_+'.java') }
+$files = @('Modrinth','ModrinthFiles','ServerProbe','ServerPack','SrvLookup','PackImport','FabricInstaller','VanillaInstaller','VerifiedDownloads','RoomInvite','ClassicInstall') | ForEach-Object { Join-Path $source ($_+'.java') }
 & javac --release 8 -Xlint:-options -encoding UTF-8 -classpath $json -d $classes @files (Join-Path $PSScriptRoot NetworkTest.java) (Join-Path $PSScriptRoot PackTest.java)
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 $arguments = @()

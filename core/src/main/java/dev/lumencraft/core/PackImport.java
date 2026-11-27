@@ -42,6 +42,15 @@ public final class PackImport {
     }
     static synchronized File installServer(File root, InputStream input, VanillaInstaller.Progress progress,
                                       Modrinth.Source source, Components components,String address,String expectedGame,String expectedDigest) throws Exception {
+        return installBundle(root,input,progress,source,components,address,expectedGame,expectedDigest,false);
+    }
+    static synchronized File installRoom(File root, InputStream input, VanillaInstaller.Progress progress,
+                                      Modrinth.Source source, Components components,String game) throws Exception {
+        return installBundle(root,input,progress,source,components,null,game,null,true);
+    }
+    private static File installBundle(File root, InputStream input, VanillaInstaller.Progress progress,
+                                      Modrinth.Source source, Components components,String address,String expectedGame,String expectedDigest,
+                                      boolean room) throws Exception {
         File instances = new File(root.getCanonicalFile(),"instances");
         VerifiedDownloads.directory(instances);
         VanillaInstaller.Progress report = progress == null ? (s,d,t)->{} : progress;
@@ -74,14 +83,14 @@ public final class PackImport {
                     String display=plan.name.replaceAll("[^\\p{L}\\p{N}._-]","-");
                     if (display.codePointCount(0,display.length())>48) display=display.substring(0,display.offsetByCodePoints(0,48));
                     target=new File(instances,"pack-"+display+"-"+digest.substring(0,12));
-                    if(address!=null) {
-                        String key=UUID.nameUUIDFromBytes(address.getBytes(StandardCharsets.UTF_8)).toString();
-                        target=new File(instances,"online-"+key+"-"+digest.substring(0,12));
+                    if(address!=null || room) {
+                        String prefix=room ? "room" : "online-"+UUID.nameUUIDFromBytes(address.getBytes(StandardCharsets.UTF_8));
+                        target=new File(instances,prefix+"-"+digest.substring(0,room?24:12));
                         if(target.isDirectory()) {
                             if (!target.equals(target.getCanonicalFile())) throw new IOException("服务器实例目录无效");
                             JSONObject receipt=VanillaInstaller.readJson(new File(target,"pack.json"));
                             JSONObject gameReceipt=VanillaInstaller.readJson(new File(target,"install.json"));
-                            if (!digest.equals(receipt.optString("archiveSha256")) || !address.equals(receipt.optString("serverAddress"))
+                            if (!digest.equals(receipt.optString("archiveSha256")) || (address!=null && !address.equals(receipt.optString("serverAddress")))
                                     || !plan.game.equals(gameReceipt.optString("id")) || !"client".equals(gameReceipt.optString("kind")))
                                 throw new IOException("已有服务器实例记录与请求不一致");
                             File loaderFile=new File(target,"loader.json");
@@ -90,6 +99,7 @@ public final class PackImport {
                                 if(!plan.loader.equals(loader.optString("loader")) || !plan.pin.equals(loader.optString("version")))
                                     throw new IOException("服务器实例的加载器与锁定版本不符");
                             } else if(loaderFile.exists()) throw new IOException("服务器实例的加载器与整合包不符");
+                            if (room) verifyRoomFiles(target,plan);
                             return target;
                         }
                     }
@@ -152,6 +162,21 @@ public final class PackImport {
                 return target;
             } finally { if (stage.exists()) discard(stage); }
         }
+    }
+
+    private static void verifyRoomFiles(File instance,Plan plan) throws Exception {
+        for (Map.Entry<String,JSONObject> item:plan.files.entrySet()) {
+            File file=VanillaInstaller.safe(instance,item.getKey());
+            JSONObject expected=item.getValue();
+            if (!file.isFile() || file.length()!=expected.getLong("fileSize") ||
+                    !VerifiedDownloads.digest(file,"SHA-512").equals(expected.getJSONObject("hashes").getString("sha512")))
+                throw new IOException("房间实例的资源已变更，请恢复文件或将实例移出列表后重试："+file.getName());
+        }
+        File mods=new File(instance,"mods");
+        File[] active=mods.listFiles((dir,name)->name.toLowerCase(Locale.ROOT).endsWith(".jar"));
+        if (mods.exists() && active==null) throw new IOException("无法校验房间实例的模组目录");
+        if (active!=null) for (File file:active) if (!plan.files.containsKey("mods/"+file.getName()))
+            throw new IOException("房间实例含有额外启用的模组："+file.getName());
     }
 
     private static File fresh(File stage,String relative) throws IOException {

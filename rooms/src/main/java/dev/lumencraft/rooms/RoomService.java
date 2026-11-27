@@ -3,11 +3,11 @@ package dev.lumencraft.rooms;
 
 import android.app.*;
 import android.content.*;
-import android.content.pm.PackageManager;
 import android.net.VpnService;
 import android.net.wifi.WifiManager;
 import android.os.*;
 import dev.lumencraft.core.ServerProbe;
+import dev.lumencraft.runtime.ServerService;
 import org.json.JSONObject;
 import java.io.*;
 import java.net.*;
@@ -28,6 +28,10 @@ public final class RoomService extends VpnService {
     private WifiManager.MulticastLock multicast;
     private ParcelFileDescriptor tunnel;
     private int dedicatedPort;
+    private String action, sessionCode;
+    private int failures;
+    private long retryAt, healthySince;
+    static volatile int retryNumber;
 
     @Override public int onStartCommand(Intent i,int flags,int id){
         if(i==null||STOP.equals(i.getAction())){end("");return START_NOT_STICKY;}
@@ -35,26 +39,53 @@ public final class RoomService extends VpnService {
         if(!active.compareAndSet(false,true))return START_NOT_STICKY;
         stopping=false;
         state="initializing";error="";address="";room="";
-        final String action=i.getAction(),invite=i.getStringExtra("room");dedicatedPort=i.getIntExtra("port",0);
+        action=i.getAction();sessionCode=i.getStringExtra("room");dedicatedPort=i.getIntExtra("port",0);
+        failures=0;retryNumber=0;retryAt=healthySince=0;
         worker.execute(()->{
             try{
                 NativeRooms.service=this;NativeRooms.initialize(this);metadata=NativeRooms.versions;
                 if(stopping)return;
                 NativeRooms.setWaiting0();
                 if(HOST.equals(action)){
+                    if(dedicatedPort==0)dedicatedPort=ServerService.activePort();
                     if(dedicatedPort!=0){
                         ServerProbe.Status status=ServerProbe.probe("127.0.0.1:"+dedicatedPort);
                         if(status.protocol<0)throw new IOException("指定端口没有可用的 Minecraft Java 服务端");
                     }
-                    acquireMulticast();NativeRooms.setScanning0(null,null);
+                    acquireMulticast();
                 }else if(JOIN.equals(action)){
-                    if(invite==null || invite.length()>512 || NativeRooms.verifyRoomCode0(invite)<0 ||
-                        !NativeRooms.setGuesting0(invite,null))throw new IOException("联机码无效或该格式不受支持");
+                    if(sessionCode==null || sessionCode.length()>512 || NativeRooms.verifyRoomCode0(sessionCode)<0)
+                        throw new IOException("联机码无效或该格式不受支持");
                 }else throw new IOException("未知的联机操作");
+                connect();
                 poll=worker.scheduleWithFixedDelay(this::observe,0,700,TimeUnit.MILLISECONDS);
             }catch(Exception|LinkageError ex){end(safeError(ex));}
         });
         return START_NOT_STICKY;
+    }
+
+    private void connect() throws IOException {
+        if (VpnService.prepare(this) != null) throw new IOException("未获得系统 VPN 授权");
+        if (HOST.equals(action)) NativeRooms.setScanning0(sessionCode, null);
+        else if (!NativeRooms.setGuesting0(sessionCode, null)) throw new IOException("陶瓦未能加入该联机码");
+    }
+
+    private void connectionFailure(int type) {
+        healthySince=0;
+        String cause;
+        switch(type){
+            case 0: case 1: cause="与房主的连接已中断"; break;
+            case 2: case 3: cause="EasyTier 连接已关闭"; break;
+            case 4: cause="本机游戏服务端未响应"; break;
+            case 5: end("房主返回的陶瓦协议响应不受支持"); return;
+            default: end("陶瓦返回未知连接错误 "+type); return;
+        }
+        if(failures>=5){end(cause+"，请确认网络和游戏均已就绪后再次连接");return;}
+        NativeRooms.setWaiting0();
+        closeTunnel();
+        room="";address="";
+        retryAt=SystemClock.elapsedRealtime()+(2000L<<failures);
+        retryNumber=++failures;state="reconnecting";
     }
 
     private static String safeError(Throwable ex){
@@ -65,10 +96,21 @@ public final class RoomService extends VpnService {
     private void observe(){
         if(stopping)return;
         try{
+            if(retryAt!=0){
+                if(SystemClock.elapsedRealtime()<retryAt)return;
+                retryAt=0;connect();
+            }
             JSONObject snapshot=new JSONObject(NativeRooms.getState0());
             String s=snapshot.getString("state");
-            if("exception".equals(s)){end("陶瓦报告连接失败，类型 "+snapshot.optInt("type",-1));return;}
+            if("exception".equals(s)){connectionFailure(snapshot.optInt("type",-1));return;}
+            if(HOST.equals(action) && ("host-starting".equals(s)||"host-ok".equals(s)))
+                sessionCode=snapshot.getString("room");
             if("host-scanning".equals(s)&&dedicatedPort>0)advertiseLocal();
+            if("host-ok".equals(s)||"guest-ok".equals(s)){
+                long now=SystemClock.elapsedRealtime();
+                if(healthySince==0)healthySince=now;
+                if(now-healthySince>=60000)failures=0;
+            }else healthySince=0;
             room="host-ok".equals(s)?snapshot.optString("room",""):"";
             address="guest-ok".equals(s)?snapshot.optString("url",""):"";state=s;
         }catch(Exception|LinkageError ex){end(safeError(ex));}
@@ -97,9 +139,8 @@ public final class RoomService extends VpnService {
     synchronized int openTunnel(byte[] ip,int prefix,String routes)throws Exception{
         if(stopping||VpnService.prepare(this)!=null)throw new IOException("未获得系统 VPN 授权");
         Builder b=new Builder().setSession("微光 · 陶瓦联机").addAddress(InetAddress.getByAddress(ip),prefix);
-        // Only the companion and the launcher should see the private room routes.
+        // Only this launcher's Android UID (including the game and server JVMs) uses room routes.
         b.addAllowedApplication(getPackageName());
-        try{b.addAllowedApplication("dev.lumencraft.android");}catch(PackageManager.NameNotFoundException ignored){}
         if(!routes.isEmpty())for(String route:routes.split(String.valueOf((char)0))){
             int sep=route.lastIndexOf('/');
             if(sep<1)throw new IOException("陶瓦返回无效路由");
@@ -128,8 +169,10 @@ public final class RoomService extends VpnService {
             if(multicast!=null&&multicast.isHeld())multicast.release();
             closeTunnel();
             try{NativeRooms.service=null;}catch(LinkageError ignored){}
-            error=why;state="waiting";active.set(false);
-            new Handler(Looper.getMainLooper()).post(()->{stopForeground(true);stopSelf();});
+            sessionCode=null;retryAt=healthySince=0;
+            new Handler(Looper.getMainLooper()).post(()->{
+                stopForeground(true);stopSelf();error=why;state="waiting";active.set(false);
+            });
         });
     }
     @Override public void onRevoke(){end("系统已撤销 VPN 授权");}

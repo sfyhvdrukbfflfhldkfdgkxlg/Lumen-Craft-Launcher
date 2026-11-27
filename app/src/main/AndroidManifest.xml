@@ -4,15 +4,20 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
-    <queries><package android:name="dev.lumencraft.rooms"/></queries>
     <application android:allowBackup="false" android:extractNativeLibs="true" android:label="微光 · LumenCraft" android:icon="@drawable/mark" android:theme="@style/LumenTheme" android:usesCleartextTraffic="false">
-        <activity android:name="dev.lumencraft.runtime.ServerConsoleActivity" android:screenOrientation="sensorLandscape" android:windowSoftInputMode="adjustResize" android:exported="false"/>
-        <activity android:name="dev.lumencraft.account.AccountsActivity" android:screenOrientation="sensorLandscape" android:windowSoftInputMode="adjustResize" android:exported="false"/>
+        <activity android:name="dev.lumencraft.runtime.ServerConsoleActivity" android:windowSoftInputMode="adjustResize" android:exported="false"/>
+        <activity android:name="dev.lumencraft.account.AccountsActivity" android:windowSoftInputMode="adjustResize" android:exported="false"/>
         <activity android:name="dev.lumencraft.client.ClientActivity" android:screenOrientation="sensorLandscape" android:configChanges="keyboardHidden|orientation|screenSize|uiMode" android:exported="false"/>
+        <activity android:name="dev.lumencraft.rooms.TerracottaActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <service android:name="dev.lumencraft.rooms.RoomService" android:exported="false" android:permission="android.permission.BIND_VPN_SERVICE" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-initiated Terracotta private Minecraft virtual LAN"/>
+            <intent-filter><action android:name="android.net.VpnService"/></intent-filter>
+            <meta-data android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON" android:value="false"/>
+        </service>
         <service android:name="dev.lumencraft.runtime.ServerService" android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-started local Minecraft dedicated server"/>
         </service>
-        <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="sensorLandscape" android:windowSoftInputMode="adjustResize" android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|uiMode">
+        <activity android:name=".MainActivity" android:exported="true" android:enableOnBackInvokedCallback="true" android:windowSoftInputMode="adjustResize" android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|uiMode">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
         </activity>
     </application>

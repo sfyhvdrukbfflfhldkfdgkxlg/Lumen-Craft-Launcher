@@ -14,6 +14,8 @@ struct LumenGL {
     GLfloat mvp[16], color[4];
     Vertex *vertices;
     size_t size, capacity;
+    size_t indexedVertices;
+    GLenum indexedMode;
     GLenum mode, error;
     bool inside, dropped;
 };
@@ -63,7 +65,7 @@ static GLenum error() {
 }
 static void begin(GLenum mode) {
     if (!current || current->inside) { fail(GL_INVALID_OPERATION);return; }
-    if (mode>8) {fail(GL_INVALID_ENUM);return;}
+    if (mode>9) {fail(GL_INVALID_ENUM);return;}
     current->mode=mode;current->inside=true;current->size=0;current->dropped=false;
 }
 static void rgba(GLfloat r,GLfloat g,GLfloat b,GLfloat a) {
@@ -91,19 +93,30 @@ static void end() {
     glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(Vertex),nullptr);
     glVertexAttribPointer(1,4,GL_FLOAT,GL_FALSE,sizeof(Vertex),reinterpret_cast<void*>(offsetof(Vertex,rgba)));
     glEnableVertexAttribArray(0);glEnableVertexAttribArray(1);
-    if (c->mode<=6) glDrawArrays(c->mode,0,static_cast<GLsizei>(c->size));
-    else {
-        size_t capacity=3*c->size;
+    if (c->mode<=6 || c->mode==9) {
+        // Desktop GL_POLYGON requires a simple, convex polygon.
+        glDrawArrays(c->mode==9 ? GL_TRIANGLE_FAN : c->mode,0,static_cast<GLsizei>(c->size));
+        return;
+    }
+    size_t faces=c->mode==7 ? c->size/4 : (c->size>=4 ? c->size/2-1 : 0);
+    if (!faces) return;
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,c->elements);
+    if (c->indexedMode!=c->mode || c->indexedVertices<c->size) {
+        // All smaller batches of this topology use a prefix of the same index buffer.
+        size_t capacity=c->capacity*3;
         auto *indices=static_cast<unsigned short*>(malloc(capacity*sizeof(unsigned short)));
         if (!indices) { fail(GL_OUT_OF_MEMORY); return; }
-        intptr_t n=lumen_quad_indices(c->mode,c->size,indices,capacity);
-        if (n>=0) {
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,c->elements);
-            glBufferData(GL_ELEMENT_ARRAY_BUFFER,n*sizeof(*indices),indices,GL_STREAM_DRAW);
-            glDrawElements(GL_TRIANGLES,static_cast<GLsizei>(n),GL_UNSIGNED_SHORT,nullptr);
-        }
+        intptr_t n=lumen_quad_indices(c->mode,c->capacity,indices,capacity);
+        if (n>=0) glBufferData(GL_ELEMENT_ARRAY_BUFFER,n*sizeof(*indices),indices,GL_STATIC_DRAW);
         free(indices);
+        GLint bytes=0;
+        glGetBufferParameteriv(GL_ELEMENT_ARRAY_BUFFER,GL_BUFFER_SIZE,&bytes);
+        if (n<0 || bytes!=n*static_cast<intptr_t>(sizeof(unsigned short))) {
+            c->indexedVertices=0;fail(GL_OUT_OF_MEMORY);return;
+        }
+        c->indexedVertices=c->capacity;c->indexedMode=c->mode;
     }
+    glDrawElements(GL_TRIANGLES,static_cast<GLsizei>(faces*6),GL_UNSIGNED_SHORT,nullptr);
 }
 extern "C" void *lumenGLGetProcAddress(const char *s) {
     if (!s) return nullptr;
