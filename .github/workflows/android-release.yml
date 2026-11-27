@@ -96,19 +96,43 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ needs.build.outputs.version }}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
         run: |
           set -euo pipefail
           export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
-          sudo setfacl -m "u:$(id -un):rw" /dev/kvm
+          if [[ -e /dev/kvm ]]; then sudo setfacl -m "u:$(id -un):rw" /dev/kvm || sudo chmod 666 /dev/kvm; fi
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "emulator" "platform-tools" "system-images;android-29;default;x86_64"
           "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n smoke -k "system-images;android-29;default;x86_64" --force <<< no
+          adb start-server
           adb version
-          "$ANDROID_HOME/emulator/emulator" -avd smoke -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect > "$RUNNER_TEMP/lumen-emulator.log" 2>&1 &
+          accel_args=()
+          if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then accel_args=(-accel off); fi
+          "$ANDROID_HOME/emulator/emulator" -avd smoke -no-window -no-audio -no-snapshot -no-boot-anim -no-metrics -wipe-data -memory 2048 -gpu swiftshader_indirect "${accel_args[@]}" > "$RUNNER_TEMP/lumen-emulator.log" 2>&1 &
           runner_pid=$!
-          trap 'kill "$runner_pid" || true' EXIT
-          timeout 180 adb wait-for-device
-          timeout 360 bash -c 'until [[ "$(adb shell getprop sys.boot_completed | tr -d "\r")" == 1 ]]; do sleep 2; done'
-          adb shell wm dismiss-keyguard
+          dump_and_cleanup() {
+            rc=$?
+            if [[ $rc -ne 0 && -f "$RUNNER_TEMP/lumen-emulator.log" ]]; then
+              echo "::group::Emulator log"
+              tail -n 120 "$RUNNER_TEMP/lumen-emulator.log" || true
+              echo "::endgroup::"
+            fi
+            kill "$runner_pid" 2>/dev/null || true
+          }
+          trap dump_and_cleanup EXIT
+          deadline=$((SECONDS + 360))
+          until [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; do
+            if ! kill -0 "$runner_pid" 2>/dev/null; then
+              echo "Emulator exited before boot completed."
+              exit 1
+            fi
+            if (( SECONDS >= deadline )); then
+              echo "Timed out waiting for Android emulator boot."
+              exit 1
+            fi
+            sleep 3
+          done
+          adb shell wm dismiss-keyguard || true
           python3 tools/upgrade_smoke.py "verified-release/LumenCraft-$VERSION-universal.apk" --baseline dist/LumenCraft-Alpha1.0.0.apk
 
   publish:
