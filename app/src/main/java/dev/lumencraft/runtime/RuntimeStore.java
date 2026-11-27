@@ -36,7 +36,37 @@ public final class RuntimeStore {
     }
     private static File root(Context c) { return new File(c.getFilesDir(), "openjdk"); }
     static File runtime(Context c, int major) { return new File(root(c), Integer.toString(major)); }
+    public static File glibcDir(Context c) { return new File(c.getFilesDir(), "runtime/glibc"); }
     private static File host(Context c) { return new File(c.getApplicationInfo().nativeLibraryDir, "liblumenjvm.so"); }
+
+    public static boolean hasGlibcCompat(Context c) {
+        File dir = glibcDir(c);
+        if (!dir.isDirectory()) return false;
+        File[] libs = dir.listFiles((d, name) -> name.startsWith("libc.so") || name.startsWith("ld-linux"));
+        return libs != null && libs.length > 0;
+    }
+
+    /** Imports a user-supplied glibc compatibility ZIP into app-private isolated runtime/glibc storage. */
+    public static synchronized int importGlibcCompat(Context c, Uri archive) throws IOException {
+        File dst = glibcDir(c);
+        File stage = new File(c.getFilesDir(), "runtime/.glibc.partial");
+        remove(stage);
+        mkdir(stage);
+        int count = 0;
+        try {
+            try (InputStream in = c.getContentResolver().openInputStream(archive)) {
+                if (in == null) throw new IOException("无法读取 glibc 兼容包");
+                unpack(in, stage, new Reporter(null));
+            }
+            File[] found = stage.listFiles();
+            if (found == null || found.length == 0) throw new IOException("glibc 兼容包为空");
+            for (File f : found) count++;
+            remove(dst);
+            mkdir(dst.getParentFile());
+            if (!stage.renameTo(dst)) throw new IOException("无法提交 glibc 兼容目录");
+            return count;
+        } finally { remove(stage); }
+    }
 
     static JSONObject downloadEntry(Context c, int major) throws IOException {
         int[] hostElf = elf(host(c));
@@ -161,8 +191,14 @@ public final class RuntimeStore {
         List<String> argv = new ArrayList<>(Arrays.asList(host(c).getAbsolutePath(), vm.getAbsolutePath(),
             home.getAbsolutePath(), Integer.toString(major), Integer.toString(heap), entry));
         ProcessBuilder pb = new ProcessBuilder(argv).directory(work).redirectErrorStream(true);
-        pb.environment().put("LD_LIBRARY_PATH", vm.getParent() + ":" + arch + ":" + new File(arch, "jli")
-                + ":" + new File(home, "lib") + ":" + c.getApplicationInfo().nativeLibraryDir);
+        String ldPath = vm.getParent() + ":" + arch + ":" + new File(arch, "jli")
+                + ":" + new File(home, "lib") + ":" + c.getApplicationInfo().nativeLibraryDir;
+        if (hasGlibcCompat(c)) {
+            File glibc = glibcDir(c);
+            ldPath = ldPath + ":" + glibc.getAbsolutePath();
+            pb.environment().put("LUMEN_GLIBC_LIB", glibc.getAbsolutePath());
+        }
+        pb.environment().put("LD_LIBRARY_PATH", ldPath);
         pb.environment().put("JAVA_HOME", home.getAbsolutePath());
         pb.environment().put("HOME", work.getAbsolutePath());
         pb.environment().put("TMPDIR", c.getCacheDir().getAbsolutePath());
