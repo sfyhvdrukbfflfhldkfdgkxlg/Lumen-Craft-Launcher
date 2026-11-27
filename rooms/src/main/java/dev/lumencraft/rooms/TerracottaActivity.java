@@ -42,6 +42,16 @@ public final class TerracottaActivity extends Activity {
         }else{
             content.addView(summary);content.addView(actions);setContentView(scroll(content));
         }
+        if (Build.VERSION.SDK_INT >= 35) {
+            View root = findViewById(android.R.id.content);
+            root.setOnApplyWindowInsetsListener((view, insets) -> {
+                android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars()
+                        | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
+                view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                return insets;
+            });
+            root.requestApplyInsets();
+        }
         TextView title=new TextView(this);title.setText("陶瓦联机");title.setTextSize(26);
         summary.addView(title);
         status=new TextView(this);status.setPadding(0,dp(8),0,dp(8));status.setTextSize(16);summary.addView(status);

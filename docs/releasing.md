@@ -28,6 +28,6 @@ python tools/package.py verify
 
 发布前使用 Android 10 x86_64 模拟器先安装固定摘要的 Alpha1.0.0，再用 adb install -r 覆盖升级至候选通用包，分别在竖屏与横屏启动实际界面。需有可用的 GitHub 托管 runner、Actions 执行额度与 contents:write 发布权限。模拟器或测试失败时工作流不会公开 Release。
 
-发布作业创建新 tag，根据 Git 历史和可选 docs/releases/版本名.md 生成日志，将五个 APK 和 SHA256SUMS.txt 上传到草稿。重新下载并核验 GitHub 上的六个附件后才公开。草稿失败后可在原运行记录点 Re-run jobs，已存在的相同附件会被复核，不覆盖同名附件；遇到不一致时停止。
+发布作业创建新 tag，根据 Git 历史和可选 docs/releases/版本名.md 生成日志，将五个 APK 和 SHA256SUMS.txt 上传到草稿。重新下载并核验 GitHub 上的六个附件后才公开。草稿发布失败后可在原运行记录点 Re-run jobs。工作流会识别指向原提交的标签，复核已上传的文件并补传缺失文件。GitHub 将中断上传标记成零字节 starter 时，工作流会清理草稿中的空条目再续传。已上传文件摘要不符时发布会停止。[GitHub Release 附件状态](https://docs.github.com/en/rest/releases/assets)
 
 GitHub 工作流位于 .github/workflows/android-release.yml。Actions 控制台中的完成状态、公开 Release 页面和其中的 SHA256SUMS.txt 共同记录远端交付结果。[GitHub Releases CLI](https://cli.github.com/manual/gh_release_create) · [Android 多 ABI APK](https://developer.android.com/build/configure-apk-splits)

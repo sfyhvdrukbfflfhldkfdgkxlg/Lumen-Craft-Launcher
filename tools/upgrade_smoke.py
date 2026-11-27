@@ -42,7 +42,7 @@ def smoke(apk, baseline):
                     bounds = re.findall(r"\d+", nodes[0].get("bounds", ""))
                     right, bottom = map(int, bounds[2:])
                     correct_orientation = right > bottom if rotation == "1" else bottom > right
-                    if correct_orientation and sum(label in labels for label in ("游戏", "资源", "联机", "服务端", "设置")) >= 3:
+                    if correct_orientation and all(label in labels for label in ("游戏", "资源", "联机", "服务端", "设置")):
                         print(f"Verified app UI: rotation {rotation}, bounds {right} x {bottom}")
                         break
             except (subprocess.SubprocessError, ET.ParseError):

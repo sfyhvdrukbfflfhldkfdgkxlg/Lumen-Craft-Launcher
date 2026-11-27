@@ -51,7 +51,8 @@ jobs:
             $publish = $true
           } elseif ($env:GITHUB_REF -eq 'refs/heads/main') {
             $exists = git tag --list $v
-            $publish = $env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -or (!$exists -and $candidate)
+            $sameRevision = $exists -and ((git rev-parse "$v^{}") -eq $env:GITHUB_SHA)
+            $publish = $env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -or ($candidate -and (!$exists -or $sameRevision))
           }
           "version=$v" >> $env:GITHUB_OUTPUT
           "publish=$($publish.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
@@ -98,18 +99,21 @@ jobs:
         run: |
           set -euo pipefail
           sudo setfacl -m "u:$(id -un):rw" /dev/kvm
-          sdkmanager "emulator" "platform-tools" "system-images;android-29;default;x86_64"
-          echo no | avdmanager create avd -n smoke -k "system-images;android-29;default;x86_64" --force
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "emulator" "platform-tools" "system-images;android-29;default;x86_64"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n smoke -k "system-images;android-29;default;x86_64" --force <<< no
           "$ANDROID_HOME/emulator/emulator" -avd smoke -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect > "$RUNNER_TEMP/lumen-emulator.log" 2>&1 &
           runner_pid=$!
           trap 'kill "$runner_pid" || true' EXIT
           timeout 180 adb wait-for-device
           timeout 360 bash -c 'until [[ "$(adb shell getprop sys.boot_completed | tr -d "\r")" == 1 ]]; do sleep 2; done'
           adb shell wm dismiss-keyguard
-          python3 tools/upgrade_smoke.py "verified-release/LumenCraft-$VERSION-universal.apk"
+          python3 tools/upgrade_smoke.py "verified-release/LumenCraft-$VERSION-universal.apk" --baseline dist/LumenCraft-Alpha1.0.0.apk
 
   publish:
     needs: [build, upgrade]
+    concurrency:
+      group: release-${{ needs.build.outputs.version }}
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

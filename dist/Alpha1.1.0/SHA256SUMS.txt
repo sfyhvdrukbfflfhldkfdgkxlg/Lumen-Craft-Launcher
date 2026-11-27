@@ -1,0 +1,5 @@
+86b7ba6c4b04aa238f8656eae3a9dc01940bbb0c598f90e4e1cb86b5742efaf5  LumenCraft-Alpha1.1.0-arm64-v8a.apk
+a39b274eab0a0c0e196be127fe61960402b1c20cd1137b781afb6dbf152a0044  LumenCraft-Alpha1.1.0-armeabi-v7a.apk
+89129ff08d83f669154c0282dc83899b1f1e5468c78de246bd8f9a7b48cbd199  LumenCraft-Alpha1.1.0-universal.apk
+53771b7bd3b6a3ebf81ae05e1bbcc1fe0d4464792db2cf2e3462bb26f2e13c2d  LumenCraft-Alpha1.1.0-x86.apk
+fb7e0f9a39e0ca1c43d07dc0fb5dbd381016a150902f0d888f619804fc6cde3f  LumenCraft-Alpha1.1.0-x86_64.apk

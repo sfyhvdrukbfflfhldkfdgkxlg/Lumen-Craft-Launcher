@@ -31,15 +31,16 @@ def main():
             "Release assets changed after verification")
     tags = git("tag", "--list").splitlines()
     require(code > 2, "Release versionCode must permit upgrades from Alpha1.0.0")
-    for older in tags:
+    if tag in tags:
+        require(git("rev-parse", tag + "^{}") == commit, "Tag already belongs to another revision")
+    prior_tags = git("tag", "--merged", "HEAD").splitlines() if tag in tags else tags
+    for older in prior_tags:
         if older == tag or not re.fullmatch(r"(?:Alpha|Beta|RC|v)?\d+\.\d+\.\d+", older):
             continue
         if "release.properties" in git("ls-tree", "--name-only", older, "release.properties").splitlines():
             previous = re.search(r"^versionCode=(\d+)$", git("show", older + ":release.properties"), re.M)
             require(previous and int(previous[1]) < code, f"versionCode is not newer than {older}")
-    if tag in tags:
-        require(git("rev-parse", tag + "^{}") == commit, "Tag already belongs to another revision")
-    else:
+    if tag not in tags:
         git("config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
         git("config", "user.name", "github-actions[bot]")
         git("tag", "-a", tag, commit, "-m", f"LumenCraft {tag}")
@@ -65,6 +66,12 @@ def main():
         require(info["isPrerelease"] == pre, "Release channel differs")
         remote = {a["name"] for a in info["assets"]}
         require(remote <= set(expected), "Release contains unexpected assets")
+        for asset in info["assets"]:
+            # A failed GitHub upload can reserve the name of a zero-byte 'starter' in a draft.
+            if str(asset.get("state", "")).lower() == "starter":
+                require(info["isDraft"] and asset.get("size") == 0, "Unexpected incomplete release asset")
+                run("gh", "release", "delete-asset", tag, asset["name"], "--yes")
+                remote.remove(asset["name"])
         missing = sorted(set(expected) - remote)
         if missing:
             require(info["isDraft"], "Existing published release is incomplete; refusing to modify it")

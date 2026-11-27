@@ -8,6 +8,8 @@
 | Windows x64，离线夹具 | 模组邀请覆盖精确版本优先于更新版本、递归前置、跳过禁用和纯服务端模组、未知 JAR 拒绝、摘要错误拒绝、重复安装和已有实例被修改后的拒绝。房间安装收据不含联机码。 |
 | Android 6.0 API 23，x86 模拟器 | NDK r24 + Rust 1.85.1 重建四种 ABI 的 GLES 2 兼容库。将 x86 库和独立探针推入设备，依次绘制 QUADS、QUADS、QUAD_STRIP、POLYGON、QUADS，五次中心像素均读出 RGB 0,255,0。非法绘制模式返回 GL_INVALID_ENUM，未实现的计算着色器入口返回空。[像素探针](tests/graphics/pixels.cpp) |
 
+发布候选使用 Android Release 构建变体，包含通用包和四个单架构包。Windows 本机通过 Gradle release、lintVital 和四套 JVM 回归。五份候选都通过 APK v1/v2 签名、zipalign、包名、ABI、版本和应用可调试标志检查。证书与 Alpha1.0.0 一致。通用包 SHA-256 为 `89129ff08d83f669154c0282dc83899b1f1e5468c78de246bd8f9a7b48cbd199`。
+
 ### 后续开发清单
 
 - 在两台物理设备上验证组网、断网重连、中继和跨网入服，同时记录现代 Android 的前台服务行为。
