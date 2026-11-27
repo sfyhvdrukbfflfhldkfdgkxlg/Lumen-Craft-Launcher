@@ -25,6 +25,7 @@ public final class NetworkTest {
         endpointAndSrv();
         status();
         installer();
+        modManagerTests();
         roomInvites();
         if (Arrays.asList(args).contains("--live")) live();
         System.out.println("Passed "+passed+" checks");
@@ -197,6 +198,36 @@ public final class NetworkTest {
             rejects("preserve user file on filename conflict",()->c.install("clash",root));
             check("user file retained",Files.size(tmp.resolve("mods/clash.jar"))==2);
         }finally{clean(tmp);}
+    }
+    private static void modManagerTests() throws Exception {
+        Catalog c=new Catalog();
+        c.entry("dep","vDep1","required",new JSONArray());
+        c.entry("mainmod","vMain1","required",new JSONArray().put(c.dependency("required","dep",null)));
+        Path tmp=Files.createTempDirectory("lumencraft-modmgr-test");
+        try {
+            File inst=tmp.toFile();
+            c.install("mainmod",inst);
+            List<ModManager.ModInfo> listed=ModManager.listMods(inst);
+            check("list installed mods",listed.size()==2);
+            ModManager.setLocked(inst,"dep",true);
+            c.entry("dep","vDep2","required",new JSONArray());
+            c.entry("mainmod","vMain2","required",new JSONArray());
+            ModManager.BatchUpdateResult upd=ModManager.updateAll(inst,"1.20.1","fabric",c);
+            check("batch update respects version lock",upd.updated==1 && upd.skippedLocked==1 && upd.rollbackId!=null);
+            check("updated mod bytes match vMain2",Arrays.equals(Files.readAllBytes(new File(inst,"mods/mainmod.jar").toPath()),c.data.get("vMain2")));
+            int restored=ModManager.rollback(inst,upd.rollbackId);
+            check("rollback restores prior mod jar",restored==1 && Arrays.equals(Files.readAllBytes(new File(inst,"mods/mainmod.jar").toPath()),c.data.get("vMain1")));
+            // Audit duplicate + server-only
+            File modsDir=new File(inst,"mods");
+            try(java.util.zip.ZipOutputStream z=new java.util.zip.ZipOutputStream(new FileOutputStream(new File(modsDir,"srv.jar")))){
+                z.putNextEntry(new java.util.zip.ZipEntry("fabric.mod.json"));
+                z.write("{\"id\":\"srvmod\",\"name\":\"SrvOnly\",\"version\":\"1.0\",\"environment\":\"server\"}".getBytes(StandardCharsets.UTF_8));
+                z.closeEntry();
+            }
+            ModManager.AuditReport audit=ModManager.auditMods(inst);
+            check("audit flags server-only mod on client",!audit.serverOnlyOnClient.isEmpty());
+            check("delete mod removes file",ModManager.deleteMod(inst,new File(modsDir,"srv.jar")) && !new File(modsDir,"srv.jar").exists());
+        } finally { clean(tmp); }
     }
     private static void live()throws Exception{
         check("live Modrinth search",!Modrinth.search("Sodium","mod").isEmpty());

@@ -116,6 +116,65 @@ public final class PackTest {
                   new File(parallelRoot,"instances").list().length==1);
         } finally { pool.shutdownNow(); }
     }
+    private static void multiFormatAndAutoModpack(File root) throws Exception {
+        Fixture f=new Fixture();
+        // CurseForge ZIP
+        ByteArrayOutputStream cfBuf=new ByteArrayOutputStream();
+        try(ZipOutputStream z=new ZipOutputStream(cfBuf)){
+            add(z,"manifest.json","{\"name\":\"CFPack\",\"minecraft\":{\"version\":\"1.20.1\",\"modLoaders\":[{\"id\":\"forge-47.3.0\"}]},\"overrides\":\"overrides\",\"files\":[{\"projectID\":1,\"fileID\":2}]}");
+            add(z,"overrides/config/cf.toml","ok=true");
+        }
+        InstanceMigration.PackSummary cf=InstanceMigration.importAnyPack(root,new ByteArrayInputStream(cfBuf.toByteArray()),null,f);
+        check("CurseForge pack format import","curseforge".equals(cf.format) && "forge".equals(cf.loader) && cf.pendingExternalMods==1 && new File(cf.instanceDir,"config/cf.toml").isFile());
+
+        // MultiMC ZIP
+        ByteArrayOutputStream mmcBuf=new ByteArrayOutputStream();
+        try(ZipOutputStream z=new ZipOutputStream(mmcBuf)){
+            add(z,"Demo/mmc-pack.json","{\"components\":[{\"uid\":\"net.minecraft\",\"version\":\"1.21.1\"},{\"uid\":\"net.neoforged\",\"version\":\"21.1.85\"}]}");
+            add(z,"Demo/instance.cfg","name=PrismPack\n");
+            add(z,"Demo/.minecraft/options.txt","fov:0.5\n");
+        }
+        InstanceMigration.PackSummary mmc=InstanceMigration.importAnyPack(root,new ByteArrayInputStream(mmcBuf.toByteArray()),null,f);
+        check("MultiMC/Prism pack format import","multimc".equals(mmc.format) && "neoforge".equals(mmc.loader) && new File(mmc.instanceDir,"options.txt").isFile());
+
+        // HMCL ZIP
+        ByteArrayOutputStream hmclBuf=new ByteArrayOutputStream();
+        try(ZipOutputStream z=new ZipOutputStream(hmclBuf)){
+            add(z,"mcbbs.packmeta","{\"name\":\"HMCLPack\",\"addons\":[{\"id\":\"game\",\"version\":\"1.20.1\"},{\"id\":\"fabric\",\"version\":\"0.15.11\"}]}");
+            add(z,"overrides/config/hmcl.cfg","a=1");
+        }
+        InstanceMigration.PackSummary hmcl=InstanceMigration.importAnyPack(root,new ByteArrayInputStream(hmclBuf.toByteArray()),null,f);
+        check("HMCL pack format import","hmcl".equals(hmcl.format) && "fabric".equals(hmcl.loader) && new File(hmcl.instanceDir,"config/hmcl.cfg").isFile());
+
+        // Directory migration (FCL/PCL)
+        File srcDir=new File(root,"legacy-pcl");
+        new File(srcDir,"saves/World1").mkdirs();
+        Files.write(new File(srcDir,"saves/World1/level.dat").toPath(),new byte[]{7,8,9});
+        int migrated=InstanceMigration.migrateDirectory(srcDir,hmcl.instanceDir);
+        check("FCL/PCL directory migration",migrated==1 && new File(hmcl.instanceDir,"saves/World1/level.dat").isFile());
+
+        // AutoModpack sync protocol
+        byte[] modBytes="amp-client-mod".getBytes(StandardCharsets.UTF_8);
+        String modSha=hex("SHA-1",modBytes);
+        JSONObject ampJson=new JSONObject().put("modpackName","AMP-Server").put("mcVersion","1.20.1")
+                .put("loader","fabric").put("loaderVersion","0.15.11")
+                .put("list",new JSONArray()
+                        .put(new JSONObject().put("file","/mods/client.jar").put("sha1",modSha).put("size",modBytes.length).put("type","mod"))
+                        .put(new JSONObject().put("file","/mods/onlyserver.jar").put("sha1",modSha).put("size",modBytes.length).put("type","server")));
+        final Map<String,byte[]> httpMap=new HashMap<>();
+        httpMap.put("/amp/content.json",ampJson.toString().getBytes(StandardCharsets.UTF_8));
+        httpMap.put("/amp/mods/client.jar",modBytes);
+        VerifiedDownloads ampTransport=new VerifiedDownloads(url -> new java.net.HttpURLConnection(url) {
+            public void connect() {} public void disconnect() {} public boolean usingProxy() { return false; }
+            public int getResponseCode() { return httpMap.containsKey(url.getPath()) ? 200 : 404; }
+            public InputStream getInputStream() { return new ByteArrayInputStream(httpMap.get(url.getPath())); }
+        });
+        AutoModpackSync.SyncManifest manifest=AutoModpackSync.fetchManifest("https://srv.example/amp/content.json",ampTransport);
+        AutoModpackSync.SyncResult sync1=AutoModpackSync.sync(root,"srv.example:25565",manifest,null,ampTransport,f);
+        check("AutoModpack client sync & server-only skip",sync1.downloaded==1 && sync1.skippedServerOnly==1 && new File(sync1.instanceDir,"mods/client.jar").isFile() && !new File(sync1.instanceDir,"mods/onlyserver.jar").exists());
+        AutoModpackSync.SyncResult sync2=AutoModpackSync.sync(root,"srv.example:25565",manifest,null,ampTransport,f);
+        check("AutoModpack idempotent re-sync",sync2.downloaded==0 && sync2.reused==1);
+    }
     public static void main(String[] args)throws Exception{
         Path tmp=Files.createTempDirectory("lumen-pack-integration");
         try{
@@ -140,6 +199,7 @@ public final class PackTest {
             rejects("valid SHA1 cannot mask bad SHA512",()->f.run(root,pack(corrupt,null)));
             check("failed imports leave only complete instance",new File(root,"instances").list().length==1);
             serverPacks(new File(root,"server-fixture"));
+            multiFormatAndAutoModpack(new File(root,"extended-fixture"));
             if(Arrays.asList(args).contains("--live")){
                 File actual=Modrinth.downloadPack("1KVo5zza",root);
                 try(ZipFile zip=new ZipFile(actual)){
