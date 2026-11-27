@@ -96,14 +96,24 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ needs.build.outputs.version }}
-          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
         run: |
           set -euo pipefail
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          export ANDROID_USER_HOME="$RUNNER_TEMP/lumencraft-android"
+          export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
           export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
           if [[ -e /dev/kvm ]]; then sudo setfacl -m "u:$(id -un):rw" /dev/kvm || sudo chmod 666 /dev/kvm; fi
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "emulator" "platform-tools" "system-images;android-29;default;x86_64"
-          "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n smoke -k "system-images;android-29;default;x86_64" --force <<< no
+          avd_dir="$ANDROID_AVD_HOME/smoke.avd"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n smoke --path "$avd_dir" -k "system-images;android-29;default;x86_64" --force <<< no
+          test -s "$avd_dir/config.ini"
+          # Some cmdline-tools versions register the .ini in a different user directory.
+          # Write the emulator's locator for the actual AVD produced by avdmanager.
+          printf 'avd.ini.encoding=UTF-8\npath=%s\ntarget=android-29\n' "$avd_dir" > "$ANDROID_AVD_HOME/smoke.ini"
+          "$ANDROID_HOME/emulator/emulator" -list-avds | grep -Fx smoke
           adb start-server
           adb version
           accel_args=()
