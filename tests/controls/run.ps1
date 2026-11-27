@@ -13,9 +13,11 @@ if ((Get-FileHash $json).Hash -ne $expected) { throw 'Test JSON library checksum
 $sdk=$env:ANDROID_HOME
 if (!$sdk) { $sdk='D:\apk\.tools\android-sdk' }
 $android=Join-Path $sdk 'platforms\android-35\android.jar'
+$core=Join-Path $root 'core\src\main\java\dev\lumencraft\core'
+$coreFiles='MirrorBench.java','VerifiedDownloads.java','KeyBindingScanner.java' | ForEach-Object {Join-Path $core $_}
 $app=Join-Path $root 'app\src\main\java\dev\lumencraft\client'
 $files='TextKeys.java','ControlProfile.java','ControlOverlay.java' | ForEach-Object {Join-Path $app $_}
-& javac --release 8 -Xlint:-options -encoding UTF-8 -cp "$json;$android" -d $classes @files (Join-Path $PSScriptRoot 'ControlsTest.java')
+& javac --release 8 -Xlint:-options -encoding UTF-8 -cp "$json;$android" -d $classes @coreFiles @files (Join-Path $PSScriptRoot 'ControlsTest.java')
 if ($LASTEXITCODE) {exit $LASTEXITCODE}
 $arguments=@()
 if ($Upstream) {
