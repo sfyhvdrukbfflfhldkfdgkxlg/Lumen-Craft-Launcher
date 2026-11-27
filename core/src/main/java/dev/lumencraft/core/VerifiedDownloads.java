@@ -16,9 +16,14 @@ public final class VerifiedDownloads {
 
     interface Opener { HttpURLConnection open(URL url) throws IOException; }
     private final Opener opener;
+    private final boolean useMirrors;
 
-    public VerifiedDownloads() { this(url -> (HttpURLConnection) url.openConnection()); }
-    VerifiedDownloads(Opener opener) { this.opener = opener; }
+    public VerifiedDownloads() { this(url -> (HttpURLConnection) url.openConnection(), true); }
+    VerifiedDownloads(Opener opener) { this(opener, false); }
+    private VerifiedDownloads(Opener opener, boolean useMirrors) {
+        this.opener = opener;
+        this.useMirrors = useMirrors;
+    }
 
     static void interrupted() throws InterruptedIOException {
         if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("下载已取消");
@@ -53,7 +58,7 @@ public final class VerifiedDownloads {
             conn.setReadTimeout(20000);
             conn.setUseCaches(false);
             conn.setInstanceFollowRedirects(false);
-            conn.setRequestProperty("User-Agent", "LumenCraftAndroid/Alpha1.0.0");
+            conn.setRequestProperty("User-Agent", "LumenCraftAndroid/Alpha1.2.0 (https://github.com/sfyhvdrukbfflfhldkfdgkxlg/Lumen-Craft-Launcher)");
             conn.setRequestProperty("Accept-Encoding", "identity");
             if (offset > 0) conn.setRequestProperty("Range", "bytes=" + offset + "-");
             try {
@@ -129,9 +134,10 @@ public final class VerifiedDownloads {
             IOException last = null;
             for (int attempt = 0; attempt < 3; attempt++) {
                 interrupted();
+                String candidate = (useMirrors && attempt == 0) ? MirrorBench.rewrite(address) : address;
                 try {
                     if (size < 0 || !part.exists() || part.length() != size) {
-                        download(address, part, size);
+                        download(candidate, part, size);
                     }
                     if (!valid(part, hash, algorithm, size)) {
                         discard(part);
@@ -153,7 +159,7 @@ public final class VerifiedDownloads {
     }
 
     private static boolean valid(File file, String hash, String algorithm, long size) throws IOException {
-        return file.isFile() && (size < 0 ? file.length() <= 8388608 : file.length() == size)
+        return file.isFile() && (size < 0 ? file.length() <= 67108864L : file.length() == size)
                 && hash.equals(digest(file, algorithm));
     }
 
@@ -162,7 +168,7 @@ public final class VerifiedDownloads {
     }
 
     private void download(String address, File part, long size) throws IOException {
-        long limit = size == -1 ? 8388608L : size;
+        long limit = size == -1 ? 67108864L : size;
         long offset = part.length();
         if (offset >= limit && offset > 0) { discard(part); offset = 0; }
         HttpURLConnection conn = open(address, offset);

@@ -15,6 +15,7 @@ public final class ServerProbe {
         public final String address, versionName, motd, loaderHint;
         public final int protocol, online, max;
         public final long latencyMs;
+        public final List<String> advertisedMods;
 
         private Status(String address, JSONObject data, long latency) throws JSONException {
             this.address = address;
@@ -27,8 +28,50 @@ public final class ServerProbe {
             StringBuilder description = new StringBuilder();
             flatten(data.opt("description"), description, 0);
             motd = description.toString().replaceAll("§[0-9a-fk-orA-FK-OR]", "");
-            loaderHint = data.optJSONObject("forgeData") != null ||
-                data.optJSONObject("modinfo") != null ? "Forge/FML" : "";
+
+            List<String> mods = new ArrayList<>();
+            String hint = "";
+            JSONObject forgeData = data.optJSONObject("forgeData");
+            JSONObject modinfo = data.optJSONObject("modinfo");
+            if (forgeData != null) {
+                int fmlNet = forgeData.optInt("fmlNetworkVersion", 2);
+                hint = fmlNet >= 3 ? "Forge/NeoForge (FML3+)" : "Forge/FML";
+                JSONArray list = forgeData.optJSONArray("mods");
+                if (list != null) {
+                    for (int i = 0; i < Math.min(list.length(), 256); i++) {
+                        JSONObject m = list.optJSONObject(i);
+                        if (m == null) continue;
+                        String modId = m.optString("modId", "");
+                        String modVer = m.optString("modmarker", "");
+                        if (!modId.isEmpty() && !"minecraft".equals(modId) && !"forge".equals(modId)) {
+                            mods.add(modVer.isEmpty() ? modId : modId + "@" + modVer);
+                        }
+                    }
+                }
+            } else if (modinfo != null) {
+                hint = "Forge/FML";
+                JSONArray list = modinfo.optJSONArray("modList");
+                if (list != null) {
+                    for (int i = 0; i < Math.min(list.length(), 256); i++) {
+                        JSONObject m = list.optJSONObject(i);
+                        if (m == null) continue;
+                        String modId = m.optString("modid", "");
+                        String modVer = m.optString("version", "");
+                        if (!modId.isEmpty() && !"minecraft".equals(modId) && !"FML".equals(modId) && !"Forge".equals(modId)) {
+                            mods.add(modVer.isEmpty() ? modId : modId + "@" + modVer);
+                        }
+                    }
+                }
+            } else {
+                String low = versionName.toLowerCase(Locale.ROOT);
+                if (low.contains("neoforge")) hint = "NeoForge";
+                else if (low.contains("fabric")) hint = "Fabric";
+                else if (low.contains("quilt")) hint = "Quilt";
+                else if (low.contains("purpur")) hint = "Purpur";
+                else if (low.contains("paper")) hint = "Paper";
+            }
+            loaderHint = hint;
+            advertisedMods = Collections.unmodifiableList(mods);
             latencyMs = latency;
         }
 
