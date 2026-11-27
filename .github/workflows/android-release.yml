@@ -98,9 +98,11 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           set -euo pipefail
+          export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
           sudo setfacl -m "u:$(id -un):rw" /dev/kvm
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "emulator" "platform-tools" "system-images;android-29;default;x86_64"
           "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n smoke -k "system-images;android-29;default;x86_64" --force <<< no
+          adb version
           "$ANDROID_HOME/emulator/emulator" -avd smoke -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect > "$RUNNER_TEMP/lumen-emulator.log" 2>&1 &
           runner_pid=$!
           trap 'kill "$runner_pid" || true' EXIT
